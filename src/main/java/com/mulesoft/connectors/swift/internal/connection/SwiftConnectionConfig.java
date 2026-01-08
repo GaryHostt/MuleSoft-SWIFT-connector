@@ -35,6 +35,11 @@ public class SwiftConnectionConfig {
     private final boolean trustAllCerts;
     private final String sslProtocol;
     private final String cipherSuites;
+    
+    // FIPS-140-2 Compliance
+    private final boolean fipsMode;
+    private final String fipsProvider;
+    private final String fipsConfigPath;
 
     private SwiftConnectionConfig(Builder builder) {
         this.host = builder.host;
@@ -64,6 +69,9 @@ public class SwiftConnectionConfig {
         this.trustAllCerts = builder.trustAllCerts;
         this.sslProtocol = builder.sslProtocol;
         this.cipherSuites = builder.cipherSuites;
+        this.fipsMode = builder.fipsMode;
+        this.fipsProvider = builder.fipsProvider;
+        this.fipsConfigPath = builder.fipsConfigPath;
     }
 
     public static Builder builder() {
@@ -100,6 +108,11 @@ public class SwiftConnectionConfig {
     public boolean isTrustAllCerts() { return trustAllCerts; }
     public String getSslProtocol() { return sslProtocol; }
     public String getCipherSuites() { return cipherSuites; }
+    
+    // FIPS-140-2 Compliance Getters
+    public boolean isFipsMode() { return fipsMode; }
+    public String getFipsProvider() { return fipsProvider; }
+    public String getFipsConfigPath() { return fipsConfigPath; }
 
     public static class Builder {
         private String host;
@@ -131,6 +144,11 @@ public class SwiftConnectionConfig {
         private boolean trustAllCerts = false;
         private String sslProtocol = "TLSv1.2";
         private String cipherSuites;
+        
+        // FIPS-140-2 Compliance Builder Fields
+        private boolean fipsMode = false;
+        private String fipsProvider = "BCFIPS";
+        private String fipsConfigPath;
 
         public Builder host(String host) {
             this.host = host;
@@ -265,6 +283,22 @@ public class SwiftConnectionConfig {
         
         public Builder cipherSuites(String cipherSuites) {
             this.cipherSuites = cipherSuites;
+            return this;
+        }
+        
+        // FIPS-140-2 Compliance Builder Methods
+        public Builder fipsMode(boolean fipsMode) {
+            this.fipsMode = fipsMode;
+            return this;
+        }
+        
+        public Builder fipsProvider(String fipsProvider) {
+            this.fipsProvider = fipsProvider;
+            return this;
+        }
+        
+        public Builder fipsConfigPath(String fipsConfigPath) {
+            this.fipsConfigPath = fipsConfigPath;
             return this;
         }
 
