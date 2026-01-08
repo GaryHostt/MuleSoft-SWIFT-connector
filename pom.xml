@@ -13,11 +13,52 @@
     
     <groupId>com.mulesoft.connectors</groupId>
     <artifactId>mule-swift-connector</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0-SNAPSHOT</version>
     <packaging>mule-extension</packaging>
     
     <name>MuleSoft SWIFT Connector</name>
     <description>Enterprise-grade SWIFT connector supporting MT, ISO 20022, gpi, and full financial compliance with stateful session management</description>
+
+    <!--
+    ═══════════════════════════════════════════════════════════════════════════
+    SEMANTIC VERSIONING STRATEGY
+    ═══════════════════════════════════════════════════════════════════════════
+    
+    Version Format: MAJOR.MINOR.PATCH-QUALIFIER
+    
+    MAJOR (1.x.x):
+      - Breaking changes (incompatible API changes)
+      - New SWIFT Standards Release year (SR2025 → SR2026)
+      - Configuration parameter renames/removals
+      - Error type changes
+      
+    MINOR (x.1.x):
+      - New features (backward-compatible)
+      - New operations (e.g., new gpi endpoints)
+      - New message types support
+      - Performance improvements
+      
+    PATCH (x.x.1):
+      - Bug fixes (backward-compatible)
+      - Security patches
+      - Documentation updates
+      - Minor performance tweaks
+      
+    QUALIFIER:
+      - SNAPSHOT: Development version (unstable)
+      - RC1, RC2: Release candidate
+      - GA: General Availability (stable release)
+      
+    EXAMPLES:
+      1.0.0-GA      → Initial release (SR2024)
+      1.1.0-SNAPSHOT → Development (new gpi features)
+      1.1.0-RC1     → Release candidate 1
+      1.1.0-GA      → Stable release with gpi enhancements
+      2.0.0-SNAPSHOT → Development (SR2025 migration, breaking changes)
+      2.0.0-GA      → Stable release with SR2025
+      
+    ═══════════════════════════════════════════════════════════════════════════
+    -->
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>

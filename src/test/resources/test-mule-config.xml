@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:swift="http://www.mulesoft.org/schema/mule/swift"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/swift http://www.mulesoft.org/schema/mule/swift/current/mule-swift.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+    <!-- SWIFT Configuration for Testing -->
+    <swift:config name="SWIFT_Test_Config">
+        <swift:connection 
+            host="localhost"
+            port="${mock.server.port}"
+            bicCode="TESTUS33XXX"
+            username="test"
+            password="test"
+            protocol="FIN"
+            connectionTimeout="5000"
+            sessionTimeout="30000">
+            <reconnection>
+                <reconnect frequency="5000" count="3"/>
+            </reconnection>
+        </swift:connection>
+    </swift:config>
+
+    <!-- Flow for validating checksum -->
+    <flow name="validate-checksum-flow">
+        <swift:validate-message config-ref="SWIFT_Test_Config" messageContent="#[payload]" />
+        <logger level="INFO" message="Checksum validated successfully" />
+    </flow>
+
+    <!-- Flow for handling NACK responses -->
+    <flow name="handle-nack-flow">
+        <swift:parse-acknowledgment config-ref="SWIFT_Test_Config" ackContent="#[payload]" />
+        <logger level="INFO" message="ACK/NACK parsed successfully" />
+    </flow>
+
+    <!-- Flow for detecting sequence gaps -->
+    <flow name="detect-sequence-gap-flow">
+        <swift:verify-sequence config-ref="SWIFT_Test_Config" message="#[payload]" />
+        <logger level="INFO" message="Sequence verified successfully" />
+    </flow>
+
+    <!-- Flow for testing socket closure -->
+    <flow name="test-socket-closure-flow">
+        <swift:send-message config-ref="SWIFT_Test_Config"
+            messageType="MT103"
+            sender="TESTUS33XXX"
+            receiver="TESTGB2LXXX"
+            format="MT"
+            messageContent="#[payload]" />
+        <logger level="INFO" message="Message sent successfully" />
+    </flow>
+
+    <!-- Flow for testing reconnection -->
+    <flow name="send-message-with-reconnect-flow">
+        <swift:send-message config-ref="SWIFT_Test_Config"
+            messageType="MT103"
+            sender="TESTUS33XXX"
+            receiver="TESTGB2LXXX"
+            format="MT"
+            messageContent="#[payload]"
+            priority="NORMAL" />
+        <logger level="INFO" message="Message sent with reconnection" />
+    </flow>
+
+    <!-- Flow for testing failed connections -->
+    <flow name="test-failed-connection-flow">
+        <swift:send-message config-ref="SWIFT_Test_Config"
+            messageType="MT103"
+            sender="TESTUS33XXX"
+            receiver="TESTGB2LXXX"
+            format="MT"
+            messageContent="#[payload]" />
+    </flow>
+
+</mule>
+
