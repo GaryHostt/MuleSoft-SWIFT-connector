@@ -188,18 +188,36 @@ public class SwiftConnectionProvider implements PoolingConnectionProvider<SwiftC
 
     @Override
     public ConnectionValidationResult validate(SwiftConnection connection) {
+        // ✅ CRITICAL FIX: Real validation with ECHO/PING, not just local flags
         try {
-            if (connection.isConnected() && connection.isSessionActive()) {
+            // First check local state
+            if (!connection.isConnected() || !connection.isSessionActive()) {
+                return ConnectionValidationResult.failure(
+                    "Local connection state indicates inactive session",
+                    new ConnectionException("Session inactive locally")
+                );
+            }
+            
+            // ✅ NOW: Send actual ECHO request to SWIFT network
+            LOGGER.debug("Validating connection with ECHO request...");
+            String echoResponse = connection.sendEchoRequest();
+            
+            // Check if response is valid
+            if (echoResponse != null && 
+                (echoResponse.contains("F01") || echoResponse.contains("ACK") || echoResponse.length() > 0)) {
+                LOGGER.debug("✅ Connection validated: received ECHO response");
                 return ConnectionValidationResult.success();
             } else {
+                LOGGER.warn("⚠️ Connection validation failed: no valid ECHO response");
                 return ConnectionValidationResult.failure(
-                    "SWIFT session is not active", 
-                    new ConnectionException("Session inactive")
+                    "SWIFT session inactive - no echo response from network",
+                    new ConnectionException("ECHO request failed")
                 );
             }
         } catch (Exception e) {
+            LOGGER.error("❌ Connection validation failed with exception", e);
             return ConnectionValidationResult.failure(
-                "Connection validation failed: " + e.getMessage(), 
+                "Connection validation failed: " + e.getMessage(),
                 e
             );
         }

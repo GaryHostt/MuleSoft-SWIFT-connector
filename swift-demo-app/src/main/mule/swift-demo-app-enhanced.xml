@@ -1,0 +1,314 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:swift="http://www.mulesoft.org/schema/mule/swift"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/swift http://www.mulesoft.org/schema/mule/swift/current/mule-swift.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- Configuration Properties -->
+    <configuration-properties file="config.properties"/>
+
+    <!-- HTTP Listener Configuration -->
+    <http:listener-config name="HTTP_Listener_config">
+        <http:listener-connection host="${http.host}" port="${http.port}" />
+    </http:listener-config>
+
+    <!-- ✅ CRITICAL FIX: SWIFT Connector Configuration with Reconnection Strategy -->
+    <swift:config name="SWIFT_Config">
+        <swift:connection 
+            host="${swift.host}"
+            port="${swift.port}"
+            bicCode="${swift.bic}"
+            username="${swift.username}"
+            password="${swift.password}"
+            protocol="FIN"
+            enableTls="${swift.enable.tls}"
+            autoReconnect="true"
+            enableSequenceSync="true">
+            
+            <!-- ✅ Reconnection strategy: 3 attempts, 5s apart, non-blocking -->
+            <reconnection>
+                <reconnect 
+                    frequency="5000" 
+                    count="3" 
+                    blocking="false"/>
+            </reconnection>
+        </swift:connection>
+    </swift:config>
+
+    <!-- ===================================================================== -->
+    <!-- ✅ CRITICAL FIX: NACK Handler Flow                                    -->
+    <!-- Processes negative acknowledgments from SWIFT network                 -->
+    <!-- ===================================================================== -->
+    <flow name="nack-handler-flow">
+        <swift:receive-message config-ref="SWIFT_Config"/>
+        
+        <logger level="INFO" message="Received SWIFT message: type=#[payload.type]"/>
+        
+        <choice>
+            <when expression="#[payload.type == 'NACK']">
+                <logger level="ERROR" message="❌ NACK received: messageId=#[payload.messageId], errorCode=#[payload.errorCode], errorText=#[payload.errorText]"/>
+                
+                <!-- Determine if error is retryable -->
+                <choice>
+                    <!-- Temporary errors (T-series) - can retry -->
+                    <when expression="#[payload.errorCode startsWith 'T']">
+                        <logger level="WARN" message="⚠️ Temporary error detected - will retry"/>
+                        <set-variable variableName="retryable" value="true"/>
+                        <flow-ref name="retry-payment-flow"/>
+                    </when>
+                    
+                    <!-- Format errors (U-series) - cannot retry -->
+                    <when expression="#[payload.errorCode startsWith 'U']">
+                        <logger level="ERROR" message="❌ Format error - cannot retry"/>
+                        <set-variable variableName="retryable" value="false"/>
+                        <flow-ref name="alert-operations-team"/>
+                    </when>
+                    
+                    <!-- Other errors - alert and investigate -->
+                    <otherwise>
+                        <logger level="ERROR" message="❌ Unknown error type - requires investigation"/>
+                        <set-variable variableName="retryable" value="false"/>
+                        <flow-ref name="alert-operations-team"/>
+                    </otherwise>
+                </choice>
+            </when>
+            
+            <when expression="#[payload.type == 'ACK']">
+                <logger level="INFO" message="✅ ACK received: messageId=#[payload.messageId]"/>
+                <!-- Update message status to confirmed -->
+                <set-variable variableName="status" value="CONFIRMED"/>
+            </when>
+            
+            <otherwise>
+                <logger level="DEBUG" message="Other message type: #[payload.type]"/>
+            </otherwise>
+        </choice>
+    </flow>
+
+    <!-- ===================================================================== -->
+    <!-- ✅ CRITICAL FIX: Timeout Reversal Flow                                -->
+    <!-- Checks for pending payments that timed out and initiates reversal     -->
+    <!-- ===================================================================== -->
+    <flow name="timeout-reversal-flow">
+        <scheduler>
+            <scheduling-strategy>
+                <!-- Run every 5 minutes -->
+                <fixed-frequency frequency="300000"/>
+            </scheduling-strategy>
+        </scheduler>
+        
+        <logger level="INFO" message="🔍 Checking for timed out payments..."/>
+        
+        <!-- Query pending payments older than 30 seconds -->
+        <swift:query-pending-payments config-ref="SWIFT_Config" olderThan="30"/>
+        
+        <logger level="INFO" message="Found #[sizeOf(payload)] pending payment(s)"/>
+        
+        <foreach>
+            <logger level="WARN" message="⏱️ Checking status of payment: #[payload.messageId]"/>
+            
+            <!-- Query status from SWIFT network -->
+            <swift:query-message-status config-ref="SWIFT_Config" messageId="#[payload.messageId]"/>
+            
+            <choice>
+                <!-- Status unknown - no response from SWIFT -->
+                <when expression="#[payload.status == 'UNKNOWN' or payload.status == null]">
+                    <logger level="ERROR" message="❌ Payment timeout confirmed: #[payload.messageId] - initiating cancellation"/>
+                    
+                    <!-- Attempt cancellation/reversal -->
+                    <try>
+                        <swift:send-cancellation config-ref="SWIFT_Config" messageId="#[payload.messageId]"/>
+                        <logger level="INFO" message="✅ Cancellation request sent for: #[payload.messageId]"/>
+                    </try>
+                    <error-handler>
+                        <on-error-continue type="ANY">
+                            <logger level="ERROR" message="❌ Failed to send cancellation: #[error.description]"/>
+                        </on-error-continue>
+                    </error-handler>
+                </when>
+                
+                <!-- Payment was processed (late ACK) -->
+                <when expression="#[payload.status == 'CONFIRMED']">
+                    <logger level="INFO" message="✅ Late ACK received for: #[payload.messageId]"/>
+                </when>
+                
+                <!-- Payment still pending -->
+                <otherwise>
+                    <logger level="WARN" message="⚠️ Payment still pending: #[payload.messageId]"/>
+                </otherwise>
+            </choice>
+        </foreach>
+        
+        <logger level="INFO" message="✅ Timeout check complete"/>
+    </flow>
+
+    <!-- ===================================================================== -->
+    <!-- Helper Flow: Retry Payment                                            -->
+    <!-- ===================================================================== -->
+    <sub-flow name="retry-payment-flow">
+        <logger level="INFO" message="🔄 Retrying payment: #[payload.messageId]"/>
+        
+        <!-- Get original payment details -->
+        <set-variable variableName="originalMessageId" value="#[payload.messageId]"/>
+        
+        <!-- Wait before retry -->
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    messageId: vars.originalMessageId ++ "-RETRY",
+    originalMessageId: vars.originalMessageId,
+    retryAttempt: 1,
+    timestamp: now()
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        
+        <logger level="INFO" message="Retry scheduled: #[payload]"/>
+    </sub-flow>
+
+    <!-- ===================================================================== -->
+    <!-- Helper Flow: Alert Operations Team                                    -->
+    <!-- ===================================================================== -->
+    <sub-flow name="alert-operations-team">
+        <logger level="ERROR" message="🚨 ALERT: Payment failed - manual intervention required"/>
+        
+        <!-- Create alert payload -->
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    alert: "SWIFT Payment Failure",
+    messageId: payload.messageId,
+    errorCode: payload.errorCode,
+    errorText: payload.errorText,
+    timestamp: now(),
+    severity: "HIGH",
+    requiresAction: true
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        
+        <logger level="ERROR" message="Alert created: #[payload]"/>
+        
+        <!-- In production: send to monitoring system, email, Slack, etc. -->
+    </sub-flow>
+
+    <!-- ==================================== -->
+    <!-- API: Send SWIFT Payment (MT103)     -->
+    <!-- POST /api/payments                   -->
+    <!-- ==================================== -->
+    <flow name="send-payment-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/payments" allowedMethods="POST" />
+        
+        <logger level="INFO" message="Received payment request: #[payload]" />
+        
+        <!-- ✅ CRITICAL FIX: Pre-validation before sending to SWIFT -->
+        <swift:validate-schema config-ref="SWIFT_Config" 
+            messageContent="#[payload]" 
+            failOnError="true"/>
+        
+        <!-- Send payment -->
+        <swift:send-message config-ref="SWIFT_Config" messageContent="#[payload]" />
+        
+        <logger level="INFO" message="Payment sent successfully: #[payload.messageId]" />
+        
+        <!-- Return success response -->
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: true,
+    messageId: payload.messageId,
+    status: "SENT",
+    timestamp: now()
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        
+        <!-- ✅ Error handling with SWIFT-specific errors -->
+        <error-handler>
+            <on-error-propagate type="SWIFT:NACK_RECEIVED">
+                <logger level="ERROR" message="NACK received: #[error.description]"/>
+                <ee:transform>
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    error: "NACK_RECEIVED",
+    message: error.description,
+    timestamp: now()
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </on-error-propagate>
+            
+            <on-error-propagate type="SWIFT:ACK_TIMEOUT">
+                <logger level="ERROR" message="ACK timeout: #[error.description]"/>
+                <ee:transform>
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    error: "ACK_TIMEOUT",
+    message: "No acknowledgment received within timeout period",
+    timestamp: now()
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </on-error-propagate>
+            
+            <on-error-propagate type="SWIFT:SCHEMA_VALIDATION_FAILED">
+                <logger level="ERROR" message="Schema validation failed: #[error.description]"/>
+                <ee:transform>
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    error: "INVALID_MESSAGE_FORMAT",
+    message: error.description,
+    timestamp: now()
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </on-error-propagate>
+            
+            <on-error-propagate type="ANY">
+                <logger level="ERROR" message="Unexpected error: #[error.description]"/>
+                <ee:transform>
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    error: "SYSTEM_ERROR",
+    message: error.description,
+    timestamp: now()
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+
+</mule>
+

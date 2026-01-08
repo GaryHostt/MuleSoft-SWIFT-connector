@@ -29,7 +29,16 @@
             protocol="FIN"
             enableTls="${swift.enable.tls}"
             autoReconnect="true"
-            enableSequenceSync="true" />
+            enableSequenceSync="true">
+            
+            <!-- ✅ CRITICAL FIX: Reconnection strategy for automatic recovery -->
+            <reconnection>
+                <reconnect 
+                    frequency="5000" 
+                    count="3" 
+                    blocking="false"/>
+            </reconnection>
+        </swift:connection>
     </swift:config>
 
     <!-- ==================================== -->

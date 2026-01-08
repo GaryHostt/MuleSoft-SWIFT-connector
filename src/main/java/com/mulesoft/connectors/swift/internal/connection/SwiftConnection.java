@@ -45,6 +45,10 @@ public class SwiftConnection {
     
     // ObjectStore for persistent state (injected by connection provider)
     private org.mule.runtime.api.store.ObjectStore<java.io.Serializable> objectStore;
+    
+    // ✅ CRITICAL FIX: Session heartbeat to prevent timeout
+    private java.util.concurrent.ScheduledExecutorService heartbeatExecutor;
+    private static final int HEARTBEAT_INTERVAL_SECONDS = 60; // Every 60 seconds
 
     public SwiftConnection(SwiftConnectionConfig config) {
         this.config = config;
@@ -73,6 +77,9 @@ public class SwiftConnection {
         if (config.isEnableSequenceSync()) {
             synchronizeSequenceNumbers();
         }
+        
+        // ✅ CRITICAL FIX: Start heartbeat to keep session alive
+        startHeartbeat();
     }
 
     /**
@@ -285,6 +292,9 @@ public class SwiftConnection {
     public void close() throws Exception {
         LOGGER.info("Closing SWIFT connection");
         
+        // ✅ Stop heartbeat
+        stopHeartbeat();
+        
         try {
             // Send logout message if session is active
             if (sessionActive.get()) {
@@ -357,6 +367,120 @@ public class SwiftConnection {
 
     public long getConnectionTimestamp() {
         return connectionTimestamp;
+    }
+    
+    // ========== ✅ CRITICAL FIX: SESSION HEARTBEAT ==========
+    
+    /**
+     * Start heartbeat to keep SWIFT session alive
+     * 
+     * SWIFT sessions timeout after 5-10 minutes of inactivity.
+     * This sends periodic Test Messages (MsgType 0) to prevent timeout.
+     */
+    private void startHeartbeat() {
+        LOGGER.info("✅ Starting session heartbeat (interval: {}s)", HEARTBEAT_INTERVAL_SECONDS);
+        
+        heartbeatExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "SWIFT-Heartbeat");
+            t.setDaemon(true);
+            return t;
+        });
+        
+        heartbeatExecutor.scheduleAtFixedRate(() -> {
+            try {
+                if (isConnected() && isSessionActive()) {
+                    sendHeartbeat();
+                }
+            } catch (Exception e) {
+                LOGGER.error("❌ Heartbeat failed", e);
+                // Don't kill the scheduler - keep trying
+            }
+        }, HEARTBEAT_INTERVAL_SECONDS, HEARTBEAT_INTERVAL_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+    }
+    
+    /**
+     * Send heartbeat message (SWIFT Test Message - MsgType 0)
+     */
+    private void sendHeartbeat() {
+        try {
+            String heartbeat = buildHeartbeatMessage();
+            sendRawMessage(heartbeat);
+            LOGGER.debug("💓 Heartbeat sent successfully");
+        } catch (Exception e) {
+            LOGGER.warn("⚠️ Failed to send heartbeat", e);
+            throw new RuntimeException("Heartbeat failed", e);
+        }
+    }
+    
+    /**
+     * Build SWIFT Test Message for heartbeat
+     */
+    private String buildHeartbeatMessage() {
+        String timestamp = String.valueOf(System.currentTimeMillis());
+        
+        return String.format(
+            "{1:F01%s0000000000}" +
+            "{2:I001%sN}" +
+            "{4:\n" +
+            ":20:HEARTBEAT-%s\n" +
+            ":79:KEEPALIVE\n" +
+            "-}",
+            config.getBicCode(),
+            config.getBicCode(),
+            timestamp
+        );
+    }
+    
+    /**
+     * Send ECHO request for connection validation
+     * Used by ConnectionValidator
+     */
+    public String sendEchoRequest() throws Exception {
+        if (!isConnected()) {
+            throw new Exception("Not connected");
+        }
+        
+        String echo = buildEchoMessage();
+        sendRawMessage(echo);
+        
+        // Wait for echo response (with timeout)
+        String response = readRawMessage();
+        
+        return response;
+    }
+    
+    /**
+     * Build SWIFT Echo/Ping message
+     */
+    private String buildEchoMessage() {
+        return String.format(
+            "{1:F01%s0000000000}" +
+            "{2:I001%sN}" +
+            "{4:\n" +
+            ":20:ECHO-REQUEST\n" +
+            ":79:PING\n" +
+            "-}",
+            config.getBicCode(),
+            config.getBicCode()
+        );
+    }
+    
+    /**
+     * Stop heartbeat (called during close)
+     */
+    private void stopHeartbeat() {
+        if (heartbeatExecutor != null) {
+            LOGGER.info("Stopping session heartbeat");
+            heartbeatExecutor.shutdown();
+            try {
+                if (!heartbeatExecutor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                    heartbeatExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                heartbeatExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 }
 
