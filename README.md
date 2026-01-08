@@ -2,8 +2,35 @@
 
 Enterprise-grade SWIFT connector for MuleSoft Anypoint Platform, supporting legacy MT standards, modern ISO 20022 (MX), SWIFT gpi, and complete financial compliance features.
 
+## ⚠️ **2026 STRATEGIC NOTE: MT-to-MX Transition**
+
+**The connector is excellent for Medium-to-Large scale MT processing.**
+
+However, to remain relevant in 2026 and beyond, financial institutions must recognize that:
+
+- **SWIFT's MT Deprecation**: MT categories 1, 2, and 9 (MT103, MT202, MT940) were deprecated in November 2025
+- **ISO 20022 (MX) is Now the Standard**: As of 2026, MX formats (pacs.008, pacs.009, camt.053) are the default for cross-border payments
+- **This Connector's Position**: Originally designed as an "MT Parser," it now serves as a **"Universal SWIFT Bridge"** treating ISO 20022 as a first-class citizen
+
+### **What This Means for Production Deployments**
+
+✅ **Existing MT Integrations**: Fully supported with production-grade parsing, validation, and transformation  
+✅ **MX Support**: Native transformation services (MT → MX) and MX message handling  
+⚠️ **Annual Maintenance Required**: SWIFT Standards Release (SR) updates occur every November. **You MUST update the Prowide library annually** to prevent message rejection by the SWIFT network.
+
+### **Recommended Action Plan**
+
+1. **Immediate (2026)**: Use native MT-to-MX transformation services in this connector
+2. **Short-Term (2026-2027)**: Migrate critical flows from MT to MX using `transformToMX` operations
+3. **Long-Term (2027+)**: Phase out MT entirely as SWIFT network support ends
+4. **Continuous**: Subscribe to SWIFT SR update notifications and update `pom.xml` annually
+
+**Failure to maintain SR compliance will result in messages being rejected by the SWIFT network, causing operational disruptions and financial losses.**
+
+---
+
 ## Version
-1.0.0
+1.1.0-SNAPSHOT
 
 ## Requirements
 - **Mule Runtime**: 4.10 or higher
