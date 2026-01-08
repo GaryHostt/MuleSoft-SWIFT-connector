@@ -1,0 +1,351 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:swift="http://www.mulesoft.org/schema/mule/swift"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/swift http://www.mulesoft.org/schema/mule/swift/current/mule-swift.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- Configuration Properties -->
+    <configuration-properties file="config.properties"/>
+
+    <!-- HTTP Listener Configuration -->
+    <http:listener-config name="HTTP_Listener_config">
+        <http:listener-connection host="${http.host}" port="${http.port}" />
+    </http:listener-config>
+
+    <!-- SWIFT Connector Configuration -->
+    <swift:config name="SWIFT_Config">
+        <swift:connection 
+            host="${swift.host}"
+            port="${swift.port}"
+            bicCode="${swift.bic}"
+            username="${swift.username}"
+            password="${swift.password}"
+            protocol="FIN"
+            enableTls="${swift.enable.tls}"
+            autoReconnect="true"
+            enableSequenceSync="true" />
+    </swift:config>
+
+    <!-- ==================================== -->
+    <!-- API: Send SWIFT Payment (MT103)     -->
+    <!-- POST /api/payments                   -->
+    <!-- ==================================== -->
+    <flow name="send-payment-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/payments" allowedMethods="POST" />
+        
+        <logger level="INFO" message="Received payment request: #[payload]" />
+        
+        <!-- Validate input -->
+        <choice>
+            <when expression="#[payload.amount == null or payload.receiver == null]">
+                <set-payload value='{"error": "Missing required fields: amount, receiver"}' />
+                <set-variable variableName="httpStatus" value="400" />
+            </when>
+            <otherwise>
+                <!-- Generate correlation ID for tracking -->
+                <swift:generate-correlation-id config-ref="SWIFT_Config"
+                    businessTransactionId="#[payload.transactionId default uuid()]" />
+                
+                <set-variable variableName="correlationId" value="#[payload.correlationId]" />
+                
+                <logger level="INFO" message="Correlation ID: #[vars.correlationId]" />
+                
+                <!-- Build MT103 message content -->
+                <set-payload value="#[
+                    ':20:' ++ (payload.reference default uuid()) ++ '\n' ++
+                    ':32A:' ++ now() as String {format: 'yyMMdd'} ++ payload.currency ++ payload.amount ++ '\n' ++
+                    ':50K:' ++ payload.orderingCustomer ++ '\n' ++
+                    ':59:' ++ payload.beneficiary
+                ]" />
+                
+                <!-- Screen for sanctions before sending -->
+                <try>
+                    <swift:screen-transaction config-ref="SWIFT_Config"
+                        screeningProvider="WORLDCHECK" />
+                    
+                    <choice>
+                        <when expression="#[payload.passed]">
+                            <logger level="INFO" message="Sanctions screening passed" />
+                            
+                            <!-- Send SWIFT message -->
+                            <swift:send-message config-ref="SWIFT_Config"
+                                messageType="MT103"
+                                sender="${swift.bic}"
+                                receiver="#[vars.originalPayload.receiver]"
+                                format="MT"
+                                priority="NORMAL" />
+                            
+                            <!-- Log audit trail -->
+                            <swift:log-audit-trail config-ref="SWIFT_Config"
+                                messageId="#[payload.messageId]"
+                                operation="SEND"
+                                metadata="#['correlationId=' ++ vars.correlationId]" />
+                            
+                            <!-- Build success response -->
+                            <set-payload value="#[{
+                                success: true,
+                                messageId: payload.messageId,
+                                sequenceNumber: attributes.sequenceNumber,
+                                timestamp: attributes.timestamp as String,
+                                correlationId: vars.correlationId,
+                                status: 'SENT'
+                            }]" />
+                            <set-variable variableName="httpStatus" value="200" />
+                        </when>
+                        <otherwise>
+                            <logger level="WARN" message="Payment blocked by sanctions screening" />
+                            <set-payload value='{"error": "Payment blocked by sanctions screening", "matchCount": #[payload.matchCount]}' />
+                            <set-variable variableName="httpStatus" value="403" />
+                        </otherwise>
+                    </choice>
+                    
+                    <error-handler>
+                        <on-error-continue type="SWIFT:SANCTIONS_SCREENING_FAILED">
+                            <set-payload value='{"error": "Sanctions screening failed"}' />
+                            <set-variable variableName="httpStatus" value="500" />
+                        </on-error-continue>
+                    </error-handler>
+                </try>
+            </otherwise>
+        </choice>
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+        <set-variable variableName="httpStatus" value="#[vars.httpStatus default 200]" />
+    </flow>
+
+    <!-- ==================================== -->
+    <!-- API: Track gpi Payment               -->
+    <!-- GET /api/payments/{uetr}/track      -->
+    <!-- ==================================== -->
+    <flow name="track-payment-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/payments/{uetr}/track" allowedMethods="GET" />
+        
+        <logger level="INFO" message="Tracking payment: #[attributes.uriParams.uetr]" />
+        
+        <!-- Track payment via gpi -->
+        <swift:track-payment config-ref="SWIFT_Config"
+            uetr="#[attributes.uriParams.uetr]" />
+        
+        <!-- Transform to JSON response -->
+        <set-payload value="#[{
+            uetr: payload.uetr,
+            status: payload.status,
+            currentLocation: payload.currentLocation,
+            originatingBank: payload.originatingBank,
+            beneficiaryBank: payload.beneficiaryBank,
+            lastUpdate: payload.lastUpdateTime as String,
+            trackingEvents: payload.trackingEvents map {
+                institution: $.institution,
+                status: $.status,
+                timestamp: $.timestamp as String,
+                remarks: $.remarks
+            }
+        }]" />
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+    </flow>
+
+    <!-- ==================================== -->
+    <!-- API: Validate Message                -->
+    <!-- POST /api/validate                   -->
+    <!-- ==================================== -->
+    <flow name="validate-message-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/validate" allowedMethods="POST" />
+        
+        <logger level="INFO" message="Validating message: #[payload.messageType]" />
+        
+        <!-- Validate schema -->
+        <swift:validate-schema config-ref="SWIFT_Config"
+            messageType="#[payload.messageType]"
+            format="#[payload.format default 'MT']"
+            standardRelease="SR2024" />
+        
+        <!-- Transform response -->
+        <set-payload value="#[{
+            valid: payload.valid,
+            messageType: payload.messageType,
+            format: payload.format,
+            standardRelease: payload.standardRelease,
+            errors: payload.errors map {
+                code: $.code,
+                message: $.message,
+                field: $.field
+            },
+            warnings: payload.warnings map {
+                code: $.code,
+                message: $.message,
+                field: $.field
+            },
+            timestamp: payload.validationTimestamp as String
+        }]" />
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+    </flow>
+
+    <!-- ==================================== -->
+    <!-- API: Translate MT to MX              -->
+    <!-- POST /api/translate/mt-to-mx         -->
+    <!-- ==================================== -->
+    <flow name="translate-mt-to-mx-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/translate/mt-to-mx" allowedMethods="POST" />
+        
+        <logger level="INFO" message="Translating MT to MX: #[payload.messageType]" />
+        
+        <!-- Translate -->
+        <swift:translate-mt-to-mx config-ref="SWIFT_Config"
+            mtMessageType="#[payload.messageType]" />
+        
+        <!-- Transform response -->
+        <set-payload value="#[{
+            success: payload.success,
+            sourceFormat: payload.sourceFormat,
+            targetFormat: payload.targetFormat,
+            mtMessageType: payload.mtMessageType,
+            mxMessageType: payload.mxMessageType,
+            translatedContent: payload.translatedContent,
+            timestamp: payload.translationTimestamp as String
+        }]" />
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+    </flow>
+
+    <!-- ==================================== -->
+    <!-- API: Lookup BIC Code                 -->
+    <!-- GET /api/bic/{bicCode}               -->
+    <!-- ==================================== -->
+    <flow name="lookup-bic-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/bic/{bicCode}" allowedMethods="GET" />
+        
+        <logger level="INFO" message="Looking up BIC: #[attributes.uriParams.bicCode]" />
+        
+        <!-- Lookup BIC -->
+        <swift:lookup-bic-code config-ref="SWIFT_Config"
+            bicCode="#[attributes.uriParams.bicCode]" />
+        
+        <!-- Transform response -->
+        <set-payload value="#[{
+            bicCode: payload.bicCode,
+            valid: payload.valid,
+            institutionName: payload.institutionName,
+            branchInformation: payload.branchInformation,
+            countryCode: payload.countryCode,
+            city: payload.city,
+            active: payload.active
+        }]" />
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+    </flow>
+
+    <!-- ==================================== -->
+    <!-- API: Check Holiday Calendar          -->
+    <!-- GET /api/holidays/{date}/{calendar}  -->
+    <!-- ==================================== -->
+    <flow name="check-holiday-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/holidays/{date}/{calendar}" allowedMethods="GET" />
+        
+        <logger level="INFO" message="Checking holiday: #[attributes.uriParams.date] on #[attributes.uriParams.calendar]" />
+        
+        <!-- Check holiday -->
+        <swift:check-holiday config-ref="SWIFT_Config"
+            valueDate="#[attributes.uriParams.date]"
+            calendar="#[attributes.uriParams.calendar]" />
+        
+        <!-- Transform response -->
+        <set-payload value="#[{
+            date: payload.valueDate as String,
+            calendar: payload.calendar,
+            isHoliday: payload.holiday,
+            isBusinessDay: payload.businessDay,
+            holidayName: payload.holidayName
+        }]" />
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+    </flow>
+
+    <!-- ==================================== -->
+    <!-- API: Get Metrics                     -->
+    <!-- GET /api/metrics                     -->
+    <!-- ==================================== -->
+    <flow name="get-metrics-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/metrics" allowedMethods="GET" />
+        
+        <logger level="INFO" message="Retrieving metrics" />
+        
+        <!-- Get metrics -->
+        <swift:get-metrics config-ref="SWIFT_Config" />
+        
+        <!-- Transform response -->
+        <set-payload value="#[{
+            messagesSent: payload.messagesSent,
+            messagesReceived: payload.messagesReceived,
+            messagesFailed: payload.messagesFailed,
+            averageLatencyMs: payload.averageLatencyMs,
+            successRate: payload.successRate,
+            timestamp: payload.collectionTimestamp as String
+        }]" />
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+    </flow>
+
+    <!-- ==================================== -->
+    <!-- API: Health Check                    -->
+    <!-- GET /api/health                      -->
+    <!-- ==================================== -->
+    <flow name="health-check-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/health" allowedMethods="GET" />
+        
+        <logger level="INFO" message="Health check requested" />
+        
+        <!-- Get session info -->
+        <swift:get-session-info config-ref="SWIFT_Config" />
+        
+        <!-- Transform response -->
+        <set-payload value="#[{
+            status: 'UP',
+            swift: {
+                connected: payload.connected,
+                sessionActive: payload.active,
+                sessionId: payload.sessionId,
+                inputSequence: payload.inputSequenceNumber,
+                outputSequence: payload.outputSequenceNumber,
+                connectionTime: payload.connectionTimestamp
+            },
+            timestamp: now() as String
+        }]" />
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+    </flow>
+
+    <!-- ==================================== -->
+    <!-- Listener: Incoming SWIFT Messages    -->
+    <!-- Triggered automatically               -->
+    <!-- ==================================== -->
+    <flow name="receive-swift-messages-flow">
+        <swift:listener config-ref="SWIFT_Config"
+            pollingInterval="5000"
+            messageTypeFilter="MT103" />
+        
+        <logger level="INFO" message="Received SWIFT message: #[attributes.messageId] from #[payload.sender]" />
+        
+        <!-- Log the message -->
+        <logger level="INFO" message="Message Type: #[payload.messageType], Content: #[payload.content]" />
+        
+        <!-- Send acknowledgment -->
+        <swift:acknowledge-message config-ref="SWIFT_Config"
+            messageId="#[attributes.messageId]"
+            acknowledgeType="ACK" />
+        
+        <logger level="INFO" message="Acknowledgment sent for message #[attributes.messageId]" />
+        
+        <!-- Process the payment (your business logic here) -->
+        <logger level="INFO" message="Processing payment..." />
+    </flow>
+
+</mule>
+

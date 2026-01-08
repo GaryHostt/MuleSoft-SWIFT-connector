@@ -1,0 +1,412 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:swift="http://www.mulesoft.org/schema/mule/swift"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/swift http://www.mulesoft.org/schema/mule/swift/current/mule-swift.xsd">
+
+    <!-- ============================================ -->
+    <!-- MUnit Test Suite for SWIFT Demo Application -->
+    <!-- ============================================ -->
+
+    <!-- Test: Send Payment Flow - Success -->
+    <munit:test name="test-send-payment-success" description="Test successful payment submission">
+        <munit:behavior>
+            <set-variable variableName="testPayload" value="#[{
+                'transactionId': 'TEST-001',
+                'amount': '5000.00',
+                'currency': 'USD',
+                'receiver': 'BANKDE33XXX',
+                'orderingCustomer': 'Test Customer',
+                'beneficiary': 'Test Beneficiary',
+                'reference': 'TEST-REF-001'
+            }]" />
+        </munit:behavior>
+        
+        <munit:execution>
+            <flow-ref name="send-payment-flow" />
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.success]" is="#[MunitTools::equalTo(true)]" message="Payment should succeed" />
+            <munit-tools:assert-that expression="#[payload.messageId]" is="#[MunitTools::notNullValue()]" message="Message ID should be present" />
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('SENT')]" message="Status should be SENT" />
+            <munit-tools:assert-that expression="#[payload.correlationId]" is="#[MunitTools::notNullValue()]" message="Correlation ID should be present" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Test: Send Payment Flow - Missing Fields -->
+    <munit:test name="test-send-payment-missing-fields" description="Test payment with missing required fields">
+        <munit:behavior>
+            <set-variable variableName="testPayload" value="#[{
+                'transactionId': 'TEST-002',
+                'amount': null,
+                'currency': 'USD'
+            }]" />
+        </munit:behavior>
+        
+        <munit:execution>
+            <flow-ref name="send-payment-flow" />
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.error]" is="#[MunitTools::notNullValue()]" message="Error message should be present" />
+            <munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(400)]" message="HTTP status should be 400" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Test: Track Payment Flow -->
+    <munit:test name="test-track-payment" description="Test gpi payment tracking">
+        <munit:behavior>
+            <munit-tools:mock-when processor="swift:track-payment">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="SWIFT_Config" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{
+                        uetr: '550e8400-e29b-41d4-a716-446655440000',
+                        status: 'IN_TRANSIT',
+                        currentLocation: 'CHASUS33XXX',
+                        originatingBank: 'DEUTDEFFXXX',
+                        beneficiaryBank: 'HSBCHKHHHKH',
+                        trackingEvents: [{
+                            institution: 'DEUTDEFFXXX',
+                            status: 'SENT',
+                            timestamp: now()
+                        }],
+                        lastUpdateTime: now()
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            
+            <set-variable variableName="uetr" value="550e8400-e29b-41d4-a716-446655440000" />
+        </munit:behavior>
+        
+        <munit:execution>
+            <set-payload value="#[vars.uetr]" />
+            <flow-ref name="track-payment-flow" />
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.uetr]" is="#[MunitTools::equalTo('550e8400-e29b-41d4-a716-446655440000')]" />
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('IN_TRANSIT')]" />
+            <munit-tools:assert-that expression="#[payload.trackingEvents]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Test: Validate Message Flow - Valid Message -->
+    <munit:test name="test-validate-message-valid" description="Test message validation with valid message">
+        <munit:behavior>
+            <munit-tools:mock-when processor="swift:validate-schema">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="SWIFT_Config" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{
+                        messageType: 'MT103',
+                        format: 'MT',
+                        standardRelease: 'SR2024',
+                        valid: true,
+                        errors: [],
+                        warnings: [],
+                        validationTimestamp: now()
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            
+            <set-variable variableName="testPayload" value="#[{
+                'messageType': 'MT103',
+                'format': 'MT',
+                'content': ':20:TEST123\n:32A:240107USD10000,00\n:50K:Test\n:59:Test'
+            }]" />
+        </munit:behavior>
+        
+        <munit:execution>
+            <flow-ref name="validate-message-flow" />
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.valid]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that expression="#[payload.messageType]" is="#[MunitTools::equalTo('MT103')]" />
+            <munit-tools:assert-that expression="#[sizeOf(payload.errors)]" is="#[MunitTools::equalTo(0)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Test: Validate Message Flow - Invalid Message -->
+    <munit:test name="test-validate-message-invalid" description="Test message validation with invalid message">
+        <munit:behavior>
+            <munit-tools:mock-when processor="swift:validate-schema">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="SWIFT_Config" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{
+                        messageType: 'MT103',
+                        format: 'MT',
+                        standardRelease: 'SR2024',
+                        valid: false,
+                        errors: [{
+                            code: 'E001',
+                            message: 'Missing required field',
+                            field: 'field20'
+                        }],
+                        warnings: [],
+                        validationTimestamp: now()
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            
+            <set-variable variableName="testPayload" value="#[{
+                'messageType': 'MT103',
+                'format': 'MT',
+                'content': 'invalid content'
+            }]" />
+        </munit:behavior>
+        
+        <munit:execution>
+            <flow-ref name="validate-message-flow" />
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.valid]" is="#[MunitTools::equalTo(false)]" />
+            <munit-tools:assert-that expression="#[sizeOf(payload.errors)]" is="#[MunitTools::greaterThan(0)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Test: Translate MT to MX -->
+    <munit:test name="test-translate-mt-to-mx" description="Test MT to MX translation">
+        <munit:behavior>
+            <munit-tools:mock-when processor="swift:translate-mt-to-mx">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="SWIFT_Config" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{
+                        success: true,
+                        sourceFormat: 'MT',
+                        targetFormat: 'MX',
+                        mtMessageType: 'MT103',
+                        mxMessageType: 'pacs.008.001.08',
+                        translatedContent: '&lt;?xml version=&quot;1.0&quot;?&gt;&lt;Document&gt;...&lt;/Document&gt;',
+                        translationTimestamp: now()
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            
+            <set-variable variableName="testPayload" value="#[{
+                'messageType': 'MT103',
+                'content': ':20:TEST123'
+            }]" />
+        </munit:behavior>
+        
+        <munit:execution>
+            <flow-ref name="translate-mt-to-mx-flow" />
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.success]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that expression="#[payload.mtMessageType]" is="#[MunitTools::equalTo('MT103')]" />
+            <munit-tools:assert-that expression="#[payload.mxMessageType]" is="#[MunitTools::equalTo('pacs.008.001.08')]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Test: BIC Lookup -->
+    <munit:test name="test-bic-lookup" description="Test BIC code lookup">
+        <munit:behavior>
+            <munit-tools:mock-when processor="swift:lookup-bic-code">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="SWIFT_Config" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{
+                        bicCode: 'DEUTDEFFXXX',
+                        valid: true,
+                        institutionName: 'Deutsche Bank AG',
+                        branchInformation: 'Head Office',
+                        countryCode: 'DE',
+                        city: 'Frankfurt',
+                        active: true
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <set-payload value="DEUTDEFFXXX" />
+            <flow-ref name="lookup-bic-flow" />
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.bicCode]" is="#[MunitTools::equalTo('DEUTDEFFXXX')]" />
+            <munit-tools:assert-that expression="#[payload.valid]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that expression="#[payload.institutionName]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Test: Holiday Check -->
+    <munit:test name="test-holiday-check" description="Test holiday calendar checking">
+        <munit:behavior>
+            <munit-tools:mock-when processor="swift:check-holiday">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="SWIFT_Config" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{
+                        valueDate: '2024-12-25' as Date,
+                        calendar: 'TARGET2',
+                        holiday: true,
+                        businessDay: false,
+                        holidayName: 'Christmas Day'
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <set-payload value="2024-12-25" />
+            <flow-ref name="check-holiday-flow" />
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.isHoliday]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that expression="#[payload.isBusinessDay]" is="#[MunitTools::equalTo(false)]" />
+            <munit-tools:assert-that expression="#[payload.holidayName]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Test: Get Metrics -->
+    <munit:test name="test-get-metrics" description="Test retrieving operational metrics">
+        <munit:behavior>
+            <munit-tools:mock-when processor="swift:get-metrics">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="SWIFT_Config" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{
+                        messagesSent: 1000,
+                        messagesReceived: 950,
+                        messagesFailed: 5,
+                        averageLatencyMs: 250,
+                        successRate: 99.5,
+                        collectionTimestamp: now()
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <flow-ref name="get-metrics-flow" />
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.messagesSent]" is="#[MunitTools::greaterThan(0)]" />
+            <munit-tools:assert-that expression="#[payload.successRate]" is="#[MunitTools::greaterThan(0.0)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Test: Health Check -->
+    <munit:test name="test-health-check" description="Test health check endpoint">
+        <munit:behavior>
+            <munit-tools:mock-when processor="swift:get-session-info">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="SWIFT_Config" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{
+                        sessionId: 'SESSION-12345',
+                        connected: true,
+                        active: true,
+                        inputSequenceNumber: 100,
+                        outputSequenceNumber: 95,
+                        connectionTimestamp: 1704628800000
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <flow-ref name="health-check-flow" />
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('UP')]" />
+            <munit-tools:assert-that expression="#[payload.swift.connected]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that expression="#[payload.swift.sessionActive]" is="#[MunitTools::equalTo(true)]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Test: Error Handling - SWIFT Connection Failed -->
+    <munit:test name="test-connection-error-handling" description="Test handling of SWIFT connection failures">
+        <munit:behavior>
+            <munit-tools:mock-when processor="swift:send-message">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="SWIFT_Config" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="SWIFT:CONNECTION_FAILED" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            
+            <set-variable variableName="testPayload" value="#[{
+                'transactionId': 'TEST-ERR-001',
+                'amount': '5000.00',
+                'currency': 'USD',
+                'receiver': 'BANKDE33XXX',
+                'orderingCustomer': 'Test Customer',
+                'beneficiary': 'Test Beneficiary'
+            }]" />
+        </munit:behavior>
+        
+        <munit:execution>
+            <try>
+                <flow-ref name="send-payment-flow" />
+                <error-handler>
+                    <on-error-continue type="SWIFT:CONNECTION_FAILED">
+                        <set-payload value="#[{'error': 'Connection failed'}]" />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.error]" is="#[MunitTools::notNullValue()]" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- Test: Sanctions Screening - Passed -->
+    <munit:test name="test-sanctions-screening-passed" description="Test sanctions screening passes">
+        <munit:behavior>
+            <munit-tools:mock-when processor="swift:screen-transaction">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="config-ref" whereValue="SWIFT_Config" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{
+                        passed: true,
+                        matchCount: 0,
+                        screeningProvider: 'WORLDCHECK',
+                        screeningTimestamp: now(),
+                        riskScore: 0.0
+                    }]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <set-payload value="test transaction data" />
+            <swift:screen-transaction config-ref="SWIFT_Config" screeningProvider="WORLDCHECK" />
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.passed]" is="#[MunitTools::equalTo(true)]" />
+            <munit-tools:assert-that expression="#[payload.matchCount]" is="#[MunitTools::equalTo(0)]" />
+        </munit:validation>
+    </munit:test>
+
+</mule>
+

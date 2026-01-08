@@ -1,0 +1,207 @@
+# MuleSoft SWIFT Connector - Component Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MULESOFT SWIFT CONNECTOR v1.0.0                     │
+│                     Enterprise Financial Messaging Gateway                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              MULE APPLICATION                                │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
+│  │ Payment Flow │  │ Tracking Flow│  │ Listener Flow│  │  Error Flow  │   │
+│  └───────┬──────┘  └───────┬──────┘  └───────┬──────┘  └───────┬──────┘   │
+└──────────┼─────────────────┼─────────────────┼─────────────────┼───────────┘
+           │                 │                 │                 │
+           ▼                 ▼                 ▼                 ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          CONNECTOR OPERATIONS LAYER                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────┐    │
+│  │ CoreMessagingOperations                                             │    │
+│  │  • sendMessage()      • acknowledgeMessage()                        │    │
+│  │  • receiveMessage()   • queryMessageStatus()                        │    │
+│  └────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────┐    │
+│  │ GpiOperations                                                       │    │
+│  │  • trackPayment()         • updatePaymentStatus()                   │    │
+│  │  • stopAndRecallPayment() • getFeeTransparency()                    │    │
+│  └────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────┐    │
+│  │ TransformationOperations                                            │    │
+│  │  • validateSchema()   • translateMtToMx()   • lookupBicCode()      │    │
+│  │  • enrichMessage()    • translateMxToMt()                           │    │
+│  └────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────┐    │
+│  │ SecurityOperations                                                  │    │
+│  │  • signMessage()       • screenTransaction()                        │    │
+│  │  • verifySignature()   • logAuditTrail()                            │    │
+│  └────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  ┌────────────────┐  ┌──────────────┐  ┌───────────────┐  ┌──────────┐   │
+│  │ SessionOps     │  │ ErrorOps     │  │ ReferenceOps  │  │ ObsOps   │   │
+│  │ • syncSeq()    │  │ • parseCode()│  │ • validateCcy │  │ • metrics│   │
+│  │ • checkDupe()  │  │ • openCase() │  │ • checkHoliday│  │ • trace  │   │
+│  └────────────────┘  └──────────────┘  └───────────────┘  └──────────┘   │
+│                                                                              │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          MESSAGE SOURCE (LISTENER)                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  SwiftMessageListener                                                        │
+│   • Event-driven inbound trigger                                            │
+│   • Configurable polling interval                                           │
+│   • Message type filtering                                                  │
+│   • Automatic flow invocation via SourceCallback                            │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CONNECTION PROVIDER LAYER                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  SwiftConnectionProvider (PoolingConnectionProvider)                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ Configuration:                                                       │  │
+│   │  • Host, Port, BIC Code                                              │  │
+│   │  • Username, Password                                                │  │
+│   │  • TLS/Mutual TLS (Truststore, Keystore)                             │  │
+│   │  • Protocol (FIN, InterAct, FileAct, gpi)                            │  │
+│   │  • Timeouts, Auto-reconnect, Sequence Sync                           │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ Connection Pool:                                                     │  │
+│   │  [Connection 1] [Connection 2] [Connection 3] ... [Connection N]    │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           SWIFT CONNECTION                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  SwiftConnection (Stateful)                                                  │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ State Management:                                                    │  │
+│   │  • Session ID                                                        │  │
+│   │  • Input Sequence Number (AtomicLong)                                │  │
+│   │  • Output Sequence Number (AtomicLong)                               │  │
+│   │  • Connection Timestamp                                              │  │
+│   │  • Last Activity Time                                                │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ TCP/TLS Socket:                                                      │  │
+│   │  • BufferedReader (input)                                            │  │
+│   │  • BufferedWriter (output)                                           │  │
+│   │  • SSLContext (TLS 1.2+)                                             │  │
+│   │  • Mutual TLS Authentication                                         │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ Methods:                                                             │  │
+│   │  • sendMessage(SwiftMessage)                                         │  │
+│   │  • receiveMessage() → SwiftMessage                                   │  │
+│   │  • synchronizeSequenceNumbers()                                      │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            DOMAIN MODEL LAYER                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ SwiftMessage (Core Entity)                                            │  │
+│  │  • messageId, messageType, format (MT/MX)                             │  │
+│  │  • sender, receiver, content                                          │  │
+│  │  • sequenceNumber, priority, status                                   │  │
+│  │  • timestamp, headers (Map)                                           │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ Response Models (40+ POJOs)                                           │  │
+│  │  • GpiTrackingResponse, ValidationResponse, SignatureResponse         │  │
+│  │  • TranslationResponse, ScreeningResponse, MetricsResponse            │  │
+│  │  • [35+ additional response objects]                                  │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ Enums                                                                 │  │
+│  │  • MessageFormat (MT, MX)                                             │  │
+│  │  • MessagePriority (URGENT, NORMAL, SYSTEM)                           │  │
+│  │  • SwiftMessageStatus (CREATED, SENT, RECEIVED, ...)                  │  │
+│  │  • GpiPaymentStatus (INITIATED, IN_TRANSIT, CREDITED, ...)            │  │
+│  │  • SwiftProtocol (FIN, INTERACT, FILEACT, GPI_API)                    │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            ERROR HANDLING LAYER                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  SwiftErrorType (30+ Specific Error Types)                                  │
+│                                                                              │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌─────────────────────────┐  │
+│  │ Connection       │  │ Validation       │  │ Business                │  │
+│  │ • CONN_FAILED    │  │ • INVALID_FORMAT │  │ • SANCTIONS_FAILED      │  │
+│  │ • SESSION_EXPIRED│  │ • SCHEMA_FAILED  │  │ • CUTOFF_EXCEEDED       │  │
+│  │ • AUTH_FAILED    │  │ • INVALID_BIC    │  │ • INSUFFICIENT_FUNDS    │  │
+│  └──────────────────┘  └──────────────────┘  └─────────────────────────┘  │
+│                                                                              │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌─────────────────────────┐  │
+│  │ Network          │  │ gpi              │  │ Security                │  │
+│  │ • MSG_REJECTED   │  │ • GPI_NOT_FOUND  │  │ • SIG_VERIFY_FAILED     │  │
+│  │ • NETWORK_NACK   │  │ • GPI_NO_TRACK   │  │ • LAU_AUTH_FAILED       │  │
+│  │ • DUPLICATE      │  │ • GPI_NO_RECALL  │  │ • CERT_EXPIRED          │  │
+│  └──────────────────┘  └──────────────────┘  └─────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         EXTERNAL INTEGRATIONS                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌───────────────────────┐  ┌───────────────────────┐  ┌─────────────────┐│
+│  │ SWIFT Network         │  │ gpi Tracker API       │  │ ObjectStore v2  ││
+│  │ • Alliance Access     │  │ • OAuth2 REST API     │  │ • Sequences     ││
+│  │ • FIN Protocol        │  │ • Payment Tracking    │  │ • Duplicates    ││
+│  │ • InterAct/FileAct    │  │ • Fee Transparency    │  │ • Replay Queue  ││
+│  └───────────────────────┘  └───────────────────────┘  └─────────────────┘│
+│                                                                              │
+│  ┌───────────────────────┐  ┌───────────────────────┐  ┌─────────────────┐│
+│  │ Screening Providers   │  │ HSM / PKI             │  │ Audit Vault     ││
+│  │ • WorldCheck          │  │ • LAU Signing         │  │ • Compliance    ││
+│  │ • FICO                │  │ • Certificate Mgmt    │  │ • Regulatory    ││
+│  │ • Accuity             │  │ • Key Management      │  │ • BCBS 239      ││
+│  └───────────────────────┘  └───────────────────────┘  └─────────────────┘│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          OBSERVABILITY & METRICS                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ┌────────────────────┐  ┌────────────────────┐  ┌────────────────────────┐│
+│  │ Correlation IDs    │  │ Metrics            │  │ Audit Logs             ││
+│  │ Flow → SWIFT → gpi │  │ • Volumes          │  │ • No PII               ││
+│  │ End-to-end trace   │  │ • Latency          │  │ • Operation tracking   ││
+│  │ UUID generation    │  │ • Success rate     │  │ • Regulatory compliant ││
+│  └────────────────────┘  └────────────────────┘  └────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              KEY FEATURES                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ✅ 32 Operations       ✅ MT/MX Support       ✅ gpi Integration            │
+│  ✅ 30+ Error Types     ✅ Auto-Reconnect      ✅ Sequence Sync              │
+│  ✅ Event-Driven        ✅ LAU Signing         ✅ Sanctions Screening        │
+│  ✅ Duplicate Detection ✅ Holiday Calendars   ✅ End-to-end Tracing         │
+│  ✅ Connection Pooling  ✅ Rate Limiting       ✅ Audit Logging              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+            Built for Mule 4.10+ | Java 17 | Mule SDK 1.10.0 | Enterprise License
+                    MuleSoft Financial Services Team | v1.0.0
+```
+

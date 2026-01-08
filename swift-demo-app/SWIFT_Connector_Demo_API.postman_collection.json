@@ -1,0 +1,488 @@
+{
+	"info": {
+		"_postman_id": "swift-connector-demo-collection",
+		"name": "SWIFT Connector Demo API",
+		"description": "Comprehensive API collection for testing the MuleSoft SWIFT Connector Demo Application.\n\nThis collection demonstrates all major SWIFT connector capabilities:\n- Send MT103 payments\n- Track gpi payments\n- Validate messages\n- Translate MT/MX\n- BIC lookup\n- Holiday checking\n- Metrics & health\n\n**Base URL:** http://localhost:8081\n\n**Prerequisites:**\n1. SWIFT Connector installed\n2. Demo app deployed and running\n3. Mule Runtime 4.10+",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Send SWIFT Payment (MT103)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"transactionId\": \"TXN-2024-001\",\n  \"amount\": \"10000.00\",\n  \"currency\": \"USD\",\n  \"receiver\": \"BANKDE33XXX\",\n  \"orderingCustomer\": \"John Doe, 123 Main St, New York\",\n  \"beneficiary\": \"Jane Smith, 456 High St, Berlin\",\n  \"reference\": \"PAYMENT-REF-12345\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/payments",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"payments"
+					]
+				},
+				"description": "Send a cross-border payment using SWIFT MT103 format.\n\n**Features:**\n- Automatic correlation ID generation\n- Sanctions screening\n- Audit trail logging\n\n**Response includes:**\n- Message ID\n- Sequence number\n- Correlation ID\n- Timestamp"
+			},
+			"response": [
+				{
+					"name": "Success Response",
+					"originalRequest": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"transactionId\": \"TXN-2024-001\",\n  \"amount\": \"10000.00\",\n  \"currency\": \"USD\",\n  \"receiver\": \"BANKDE33XXX\",\n  \"orderingCustomer\": \"John Doe\",\n  \"beneficiary\": \"Jane Smith\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/payments",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"payments"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n  \"success\": true,\n  \"messageId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"sequenceNumber\": 1,\n  \"timestamp\": \"2024-01-07T10:30:00\",\n  \"correlationId\": \"650e8400-e29b-41d4-a716-446655440001\",\n  \"status\": \"SENT\"\n}"
+				}
+			]
+		},
+		{
+			"name": "2. Track gpi Payment",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/payments/550e8400-e29b-41d4-a716-446655440000/track",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"payments",
+						"550e8400-e29b-41d4-a716-446655440000",
+						"track"
+					]
+				},
+				"description": "Track a cross-border payment using SWIFT gpi.\n\n**Provides:**\n- Real-time payment status\n- Current location in banking chain\n- Tracking events with timestamps\n- Originating and beneficiary banks\n\n**Use the UETR from previous payment or any valid UETR**"
+			},
+			"response": [
+				{
+					"name": "Tracking Response",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/payments/550e8400-e29b-41d4-a716-446655440000/track",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"payments",
+								"550e8400-e29b-41d4-a716-446655440000",
+								"track"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n  \"uetr\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"IN_TRANSIT\",\n  \"currentLocation\": \"CHASUS33XXX\",\n  \"originatingBank\": \"DEUTDEFFXXX\",\n  \"beneficiaryBank\": \"HSBCHKHHHKH\",\n  \"lastUpdate\": \"2024-01-07T11:00:00\",\n  \"trackingEvents\": [\n    {\n      \"institution\": \"DEUTDEFFXXX\",\n      \"status\": \"SENT\",\n      \"timestamp\": \"2024-01-07T08:30:00\"\n    },\n    {\n      \"institution\": \"CHASUS33XXX\",\n      \"status\": \"RECEIVED\",\n      \"timestamp\": \"2024-01-07T09:30:00\"\n    }\n  ]\n}"
+				}
+			]
+		},
+		{
+			"name": "3. Validate Message Schema",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"messageType\": \"MT103\",\n  \"format\": \"MT\",\n  \"content\": \":20:TESTREF123\\n:32A:240107USD10000,00\\n:50K:Test Customer\\n:59:Test Beneficiary\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/validate",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"validate"
+					]
+				},
+				"description": "Validate a SWIFT message against SR2024 standards.\n\n**Checks:**\n- Field presence (mandatory/optional)\n- Field formats and lengths\n- Character sets\n- Business rules\n\n**Returns:**\n- Validation status\n- List of errors\n- List of warnings"
+			},
+			"response": [
+				{
+					"name": "Validation Success",
+					"originalRequest": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"messageType\": \"MT103\",\n  \"format\": \"MT\",\n  \"content\": \":20:TEST123\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/validate",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"validate"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n  \"valid\": false,\n  \"messageType\": \"MT103\",\n  \"format\": \"MT\",\n  \"standardRelease\": \"SR2024\",\n  \"errors\": [\n    {\n      \"code\": \"E002\",\n      \"message\": \"Mandatory field :20: (Reference) is missing\",\n      \"field\": \"field20\"\n    }\n  ],\n  \"warnings\": [],\n  \"timestamp\": \"2024-01-07T10:35:00\"\n}"
+				}
+			]
+		},
+		{
+			"name": "4. Translate MT to MX (ISO 20022)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"messageType\": \"MT103\",\n  \"content\": \":20:TESTREF123\\n:32A:240107USD10000,00\\n:50K:John Doe\\n:59:Jane Smith\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/translate/mt-to-mx",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"translate",
+						"mt-to-mx"
+					]
+				},
+				"description": "Convert legacy MT format to modern ISO 20022 (MX) format.\n\n**Supports migration to:**\n- MT103 → pacs.008.001.08\n- MT202 → pacs.009.001.08\n- MT900 → camt.054.001.08\n\n**Returns:**\n- Translated XML content\n- Source/target formats\n- Message type mapping"
+			},
+			"response": [
+				{
+					"name": "Translation Success",
+					"originalRequest": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"messageType\": \"MT103\",\n  \"content\": \":20:TEST123\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/translate/mt-to-mx",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"translate",
+								"mt-to-mx"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n  \"success\": true,\n  \"sourceFormat\": \"MT\",\n  \"targetFormat\": \"MX\",\n  \"mtMessageType\": \"MT103\",\n  \"mxMessageType\": \"pacs.008.001.08\",\n  \"translatedContent\": \"<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?>\\n<Document xmlns=\\\"urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08\\\">...</Document>\",\n  \"timestamp\": \"2024-01-07T10:40:00\"\n}"
+				}
+			]
+		},
+		{
+			"name": "5. Lookup BIC Code",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/bic/DEUTDEFFXXX",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"bic",
+						"DEUTDEFFXXX"
+					]
+				},
+				"description": "Validate and lookup Bank Identifier Code details.\n\n**Returns:**\n- Validation status\n- Institution name\n- Branch information\n- Country and city\n- Active status\n\n**Try these BICs:**\n- DEUTDEFFXXX (Deutsche Bank)\n- CHASUS33XXX (JPMorgan Chase)\n- HSBCHKHHHKH (HSBC Hong Kong)"
+			},
+			"response": [
+				{
+					"name": "BIC Lookup Success",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/bic/DEUTDEFFXXX",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"bic",
+								"DEUTDEFFXXX"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n  \"bicCode\": \"DEUTDEFFXXX\",\n  \"valid\": true,\n  \"institutionName\": \"Example Bank AG\",\n  \"branchInformation\": \"Head Office\",\n  \"countryCode\": \"DE\",\n  \"city\": \"Frankfurt\",\n  \"active\": true\n}"
+				}
+			]
+		},
+		{
+			"name": "6. Check Holiday Calendar",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/holidays/2024-12-25/TARGET2",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"holidays",
+						"2024-12-25",
+						"TARGET2"
+					]
+				},
+				"description": "Check if a date is a banking holiday.\n\n**Supported Calendars:**\n- TARGET2 (European Central Bank)\n- US_FED (Federal Reserve)\n- UK_BOE (Bank of England)\n\n**Returns:**\n- Holiday status\n- Business day indicator\n- Holiday name (if applicable)\n\n**Date format:** YYYY-MM-DD"
+			},
+			"response": [
+				{
+					"name": "Holiday Check Response",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/holidays/2024-12-25/TARGET2",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"holidays",
+								"2024-12-25",
+								"TARGET2"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n  \"date\": \"2024-12-25\",\n  \"calendar\": \"TARGET2\",\n  \"isHoliday\": true,\n  \"isBusinessDay\": false,\n  \"holidayName\": \"Christmas Day\"\n}"
+				}
+			]
+		},
+		{
+			"name": "7. Get Operational Metrics",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/metrics",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"metrics"
+					]
+				},
+				"description": "Retrieve operational metrics for monitoring.\n\n**Metrics include:**\n- Messages sent/received/failed counts\n- Average latency\n- Success rate\n- Timestamp\n\n**Use for:**\n- Monitoring dashboards\n- SLA tracking\n- Performance analysis"
+			},
+			"response": [
+				{
+					"name": "Metrics Response",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/metrics",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"metrics"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n  \"messagesSent\": 1000,\n  \"messagesReceived\": 950,\n  \"messagesFailed\": 5,\n  \"averageLatencyMs\": 250,\n  \"successRate\": 99.5,\n  \"timestamp\": \"2024-01-07T12:00:00\"\n}"
+				}
+			]
+		},
+		{
+			"name": "8. Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/health",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"health"
+					]
+				},
+				"description": "Check application and SWIFT connection health.\n\n**Returns:**\n- Overall status\n- SWIFT connection status\n- Session information\n- Sequence numbers\n\n**Status values:**\n- UP: Everything operational\n- DOWN: Service unavailable"
+			},
+			"response": [
+				{
+					"name": "Health Check Response",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/health",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"health"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n  \"status\": \"UP\",\n  \"swift\": {\n    \"connected\": true,\n    \"sessionActive\": true,\n    \"sessionId\": \"SESSION-12345\",\n    \"inputSequence\": 100,\n    \"outputSequence\": 95,\n    \"connectionTime\": 1704628800000\n  },\n  \"timestamp\": \"2024-01-07T12:05:00\"\n}"
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8081",
+			"type": "string"
+		}
+	]
+}
+

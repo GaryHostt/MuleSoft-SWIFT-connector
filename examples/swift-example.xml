@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:swift="http://www.mulesoft.org/schema/mule/swift"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/swift http://www.mulesoft.org/schema/mule/swift/current/mule-swift.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- SWIFT Configuration -->
+    <swift:config name="SWIFT_Config">
+        <swift:connection 
+            host="${swift.host}"
+            port="${swift.port}"
+            bicCode="${swift.bic}"
+            username="${swift.username}"
+            password="${swift.password}"
+            protocol="FIN"
+            enableTls="true"
+            truststorePath="${truststore.path}"
+            truststorePassword="${truststore.password}"
+            keystorePath="${keystore.path}"
+            keystorePassword="${keystore.password}" />
+    </swift:config>
+
+    <!-- HTTP Listener Configuration -->
+    <http:listener-config name="HTTP_Config">
+        <http:listener-connection host="0.0.0.0" port="8081" />
+    </http:listener-config>
+
+    <!-- Flow: Send Payment -->
+    <flow name="send-payment-flow">
+        <http:listener config-ref="HTTP_Config" path="/send-payment" />
+        
+        <logger level="INFO" message="Received payment request: #[payload]" />
+        
+        <!-- Transform to MT103 format -->
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+":20:" ++ payload.reference ++ "\n" ++
+":32A:240107" ++ payload.currency ++ payload.amount ++ "\n" ++
+":50K:" ++ payload.orderingCustomer ++ "\n" ++
+":59:" ++ payload.beneficiary
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        
+        <!-- Send SWIFT message -->
+        <swift:send-message config-ref="SWIFT_Config"
+            messageType="MT103"
+            sender="${swift.bic}"
+            receiver="#[payload.receiverBic]"
+            format="MT"
+            priority="NORMAL" />
+        
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: true,
+    messageId: payload.messageId,
+    sequenceNumber: attributes.sequenceNumber,
+    timestamp: attributes.timestamp
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- Flow: Track gpi Payment -->
+    <flow name="track-payment-flow">
+        <http:listener config-ref="HTTP_Config" path="/track/{uetr}" />
+        
+        <swift:track-payment config-ref="SWIFT_Config"
+            uetr="#[attributes.uriParams.uetr]" />
+        
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    uetr: payload.uetr,
+    status: payload.status,
+    currentLocation: payload.currentLocation,
+    originatingBank: payload.originatingBank,
+    beneficiaryBank: payload.beneficiaryBank,
+    trackingEvents: payload.trackingEvents map {
+        institution: $.institution,
+        status: $.status,
+        timestamp: $.timestamp as String
+    }
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- Flow: Incoming Message Listener -->
+    <flow name="receive-messages-flow">
+        <swift:listener config-ref="SWIFT_Config"
+            pollingInterval="5000"
+            messageTypeFilter="MT103" />
+        
+        <logger level="INFO" 
+            message="Received SWIFT message: #[attributes.messageId] from #[payload.sender]" />
+        
+        <!-- Process message -->
+        <logger level="INFO" message="Processing payment: #[payload.content]" />
+        
+        <!-- Send acknowledgment -->
+        <swift:acknowledge-message config-ref="SWIFT_Config"
+            messageId="#[attributes.messageId]"
+            acknowledgeType="ACK" />
+    </flow>
+
+</mule>
+
