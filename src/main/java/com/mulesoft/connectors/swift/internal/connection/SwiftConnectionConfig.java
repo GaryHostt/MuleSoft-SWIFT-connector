@@ -24,6 +24,7 @@ public class SwiftConnectionConfig {
     private final String certificateAlias;
     private final int streamingThresholdBytes;
     private final int heartbeatInterval;
+    private final String messageEncoding; // ← BATTLE-SCARRED: Support legacy EBCDIC/ISO-8859-1
 
     private SwiftConnectionConfig(Builder builder) {
         this.host = builder.host;
@@ -44,6 +45,7 @@ public class SwiftConnectionConfig {
         this.certificateAlias = builder.certificateAlias;
         this.streamingThresholdBytes = builder.streamingThresholdBytes;
         this.heartbeatInterval = builder.heartbeatInterval;
+        this.messageEncoding = builder.messageEncoding;
     }
 
     public static Builder builder() {
@@ -69,6 +71,7 @@ public class SwiftConnectionConfig {
     public String getCertificateAlias() { return certificateAlias; }
     public int getStreamingThresholdBytes() { return streamingThresholdBytes; }
     public int getHeartbeatInterval() { return heartbeatInterval; }
+    public String getMessageEncoding() { return messageEncoding; }
 
     public static class Builder {
         private String host;
@@ -89,6 +92,7 @@ public class SwiftConnectionConfig {
         private String certificateAlias;
         private int streamingThresholdBytes = 50 * 1024 * 1024; // 50MB default
         private int heartbeatInterval = 60000; // 60 seconds default
+        private String messageEncoding = "UTF-8"; // ← DEFAULT: Modern SWIFT uses UTF-8
 
         public Builder host(String host) {
             this.host = host;
@@ -177,6 +181,11 @@ public class SwiftConnectionConfig {
 
         public Builder heartbeatInterval(int heartbeatInterval) {
             this.heartbeatInterval = heartbeatInterval;
+            return this;
+        }
+
+        public Builder messageEncoding(String messageEncoding) {
+            this.messageEncoding = messageEncoding;
             return this;
         }
 
