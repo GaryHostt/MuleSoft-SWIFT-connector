@@ -33,7 +33,7 @@ However, to remain relevant in 2026 and beyond, financial institutions must reco
 1.1.0-SNAPSHOT
 
 ## Requirements
-- **Mule Runtime**: 4.10 or higher
+- **Mule Runtime**: 4.9 or higher
 - **Java**: JDK 17
 - **Mule SDK**: 1.10.0
 - **Anypoint Studio**: 7.x or higher
