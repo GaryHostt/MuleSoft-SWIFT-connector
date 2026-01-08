@@ -2,6 +2,8 @@ package com.mulesoft.connectors.swift;
 
 import org.junit.Test;
 import org.mule.functional.junit4.MuleArtifactFunctionalTestCase;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * Enhanced MUnit Test Suite - Negative Scenarios ("Dirty Tests")

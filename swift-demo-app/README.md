@@ -11,8 +11,73 @@ A complete Mule application demonstrating all major capabilities of the SWIFT Co
 - Check holiday calendars
 - Monitor metrics and health
 
-## Prerequisites
+## Purpose & Design Pattern
 
+### System API Layer Architecture
+This application demonstrates the **System API layer** pattern in MuleSoft's API-Led Connectivity architecture. It takes simplified payloads (JSON/XML) from upstream systems and uses DataWeave to transform them into the raw SWIFT MT format required by the SWIFT network.
+
+**Key Responsibilities**:
+- Abstracting SWIFT complexity from business applications
+- Handling protocol-specific transformations (JSON → MT103, XML → pacs.008)
+- Managing SWIFT-specific error handling and retry logic
+- Providing a clean RESTful interface for payment operations
+
+### Connector Usage Demonstration
+This demo showcases the specific operations of the custom SWIFT connector:
+- **Parse Operations**: Extracting data from SWIFT messages (Block 1-5 parsing)
+- **Generate Operations**: Building compliant SWIFT MT/MX messages
+- **Validation Operations**: Schema and field validation (SR2024 rules)
+- **Transformation Operations**: MT-to-MX conversion (legacy modernization)
+- **Security Operations**: Message signing, sanctions screening, audit logging
+
+**Educational Focus**: The application is particularly helpful for understanding how the connector handles **SWIFT Block 4** (the message content), which is notoriously difficult to map due to:
+- Field-based structure (`:20:`, `:32A:`, `:50K:`, etc.)
+- Complex validation rules (mandatory vs. optional fields)
+- Multi-line field handling (addresses, remittance info)
+- Character set restrictions (SWIFT X-Character Set)
+
+### Assessment
+
+#### Educational Value: **High**
+- ✅ Provides a "template" for SWIFT field mapping
+- ✅ Demonstrates DataWeave transformations for SWIFT formats
+- ✅ Shows error handling patterns for SWIFT-specific failures
+- ✅ Illustrates connector operation usage with real examples
+- ✅ Includes Postman collection for immediate testing
+- ✅ Documents common integration patterns
+
+#### Production Readiness: **Low**
+
+⚠️ **Missing Enterprise-Grade Features Required for Production SWIFT**:
+
+| Feature | Demo App | Production Requirement | Impact |
+|---------|----------|------------------------|--------|
+| **Non-repudiation Logging** | ❌ No | ✅ Tamper-evident audit trail | Regulatory compliance (SOX, FINRA) |
+| **Duplicate Detection** | ❌ No | ✅ Persistent idempotency checks | Prevents double payments ($M losses) |
+| **HSM Integration** | ❌ No | ✅ Hardware Security Module signing | Tier-1 bank requirement (LAU) |
+| **Rate Limiting** | ❌ No | ✅ Throttling & backpressure | Prevents SWIFT network penalties |
+| **Sequence Management** | ❌ No | ✅ Persistent sequence tracking | Session recovery after crashes |
+| **Real-time Monitoring** | ❌ No | ✅ Operational dashboards & alerts | SLA compliance, incident response |
+| **FIPS-140-2 Compliance** | ❌ No | ✅ Federal/DoD deployments | Government contracts |
+| **Connection Pooling** | ⚠️ Basic | ✅ Advanced with health checks | High-throughput processing |
+| **BICPlus Validation** | ❌ No | ✅ Real-time directory lookup | Prevents message rejection |
+| **Cutoff Time Checks** | ❌ No | ✅ Holiday & cutoff awareness | Avoids trapped funds |
+
+**Recommendation**: 
+> Use this demo as a **learning tool and integration starting point**. For production deployments, implement the missing enterprise features outlined in the main connector documentation, including:
+> - ObjectStore persistence for state management
+> - HSM signing for message authentication
+> - Comprehensive audit logging with PII sanitization
+> - Persistent duplicate detection
+> - Real-time BIC/IBAN validation
+> - FIPS-140-2 compliance mode
+> - Advanced reconnection strategies
+>
+> **Production Timeline**: Budget 4-6 weeks to harden this demo for production use with enterprise features.
+
+---
+
+## Prerequisites
 - Mule Runtime 4.10+
 - Java 17
 - SWIFT Connector 1.0.0 installed
