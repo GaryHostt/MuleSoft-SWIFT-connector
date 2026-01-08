@@ -168,6 +168,67 @@ public class SwiftConnectionProvider implements PoolingConnectionProvider<SwiftC
     @Optional
     private String certificateAlias;
 
+    // ========== BANKING-GRADE SECURITY: HSM Configuration ==========
+    
+    @Parameter
+    @DisplayName("HSM Enabled")
+    @Summary("Enable Hardware Security Module (HSM) for signing operations")
+    @Placement(tab = "Security", order = 7)
+    @Optional(defaultValue = "false")
+    private boolean hsmEnabled;
+    
+    @Parameter
+    @DisplayName("HSM Provider")
+    @Summary("HSM provider class (e.g., sun.security.pkcs11.SunPKCS11)")
+    @Placement(tab = "Security", order = 8)
+    @Optional
+    private String hsmProvider;
+    
+    @Parameter
+    @DisplayName("HSM Config Path")
+    @Summary("Path to HSM PKCS#11 configuration file")
+    @Placement(tab = "Security", order = 9)
+    @Optional
+    private String hsmConfigPath;
+    
+    @Parameter
+    @Password
+    @DisplayName("HSM PIN")
+    @Summary("HSM PIN/password for slot access")
+    @Placement(tab = "Security", order = 10)
+    @Optional
+    private String hsmPin;
+
+    // ========== BANKING-GRADE SECURITY: MTLS Configuration ==========
+    
+    @Parameter
+    @DisplayName("Client Certificate Required")
+    @Summary("Require client certificate for mutual TLS (MTLS)")
+    @Placement(tab = "Security", order = 11)
+    @Optional(defaultValue = "true")
+    private boolean clientCertRequired;
+    
+    @Parameter
+    @DisplayName("Trust All Certificates")
+    @Summary("Trust all SSL certificates (ONLY for development/testing)")
+    @Placement(tab = "Security", order = 12)
+    @Optional(defaultValue = "false")
+    private boolean trustAllCerts;
+    
+    @Parameter
+    @DisplayName("SSL Protocol")
+    @Summary("SSL/TLS protocol version (TLSv1.2, TLSv1.3)")
+    @Placement(tab = "Security", order = 13)
+    @Optional(defaultValue = "TLSv1.2")
+    private String sslProtocol;
+    
+    @Parameter
+    @DisplayName("Cipher Suites")
+    @Summary("Comma-separated list of enabled cipher suites (leave empty for defaults)")
+    @Placement(tab = "Security", order = 14)
+    @Optional
+    private String cipherSuites;
+
     @Override
     public SwiftConnection connect() throws ConnectionException {
         LOGGER.info("Establishing SWIFT connection to {}:{} using protocol {}", host, port, protocol);

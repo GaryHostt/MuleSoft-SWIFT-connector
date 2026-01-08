@@ -12,6 +12,44 @@ Enterprise-grade SWIFT connector for MuleSoft Anypoint Platform, supporting lega
 - **Anypoint Studio**: 7.x or higher
 - **License**: Enterprise License required
 
+## ⚠️ CRITICAL: Banking-Grade Security & Dependency Management
+
+### Security Requirements for Production
+
+**For production SWIFT connectivity, you MUST configure**:
+
+1. **Mutual TLS (MTLS)**: SWIFT requires client certificate authentication
+2. **HSM Integration**: Hardware Security Module for signing operations (recommended)
+3. **Keystore/Truststore**: Proper certificate management
+
+**See "Banking-Grade Security Configuration" section below for details.**
+
+### ⚡ CRITICAL: Prowide Library Version Management
+
+**The Prowide Core library MUST be updated regularly to support new SWIFT Standards Release (SR) updates.**
+
+**Current Prowide Version**: Check `pom.xml` for `<prowide.version>` property
+
+**Update Schedule**:
+- **November Each Year**: SWIFT releases new SR (e.g., SR2024 → SR2025)
+- **Within 30 Days**: Prowide releases updated library with new validation rules
+- **Action Required**: Update `pom.xml` and rebuild connector
+
+**How to Update**:
+```xml
+<properties>
+    <!-- Update this version annually after SWIFT SR release -->
+    <prowide.version>SRU2024-10.0.0</prowide.version>  <!-- ← CHECK FOR UPDATES -->
+</properties>
+```
+
+**Failure to Update Risks**:
+- ❌ Messages rejected by SWIFT network (new mandatory fields)
+- ❌ Validation failures (new business rules not enforced)
+- ❌ Compliance issues (outdated SR year)
+
+**Recommended**: Subscribe to Prowide release notifications at https://github.com/prowide/prowide-core/releases
+
 ## Features
 
 ### 1. Core Messaging Operations
@@ -85,6 +123,99 @@ Add the connector to your Mule application's `pom.xml`:
 5. Install and restart Studio
 
 ## Configuration
+
+### Banking-Grade Security Configuration (PRODUCTION)
+
+**For production SWIFT connectivity, proper security configuration is MANDATORY.**
+
+#### Mutual TLS (MTLS) Configuration
+
+```xml
+<swift:config name="SWIFT_Production_Config">
+    <swift:connection 
+        host="swift.production.bank.com"
+        port="3000"
+        bicCode="BANKUS33XXX"
+        username="${swift.username}"
+        password="${secure::swift.password}"
+        enableTls="true"
+        
+        <!-- ✅ KEYSTORE (Your Bank's Certificate) -->
+        keystorePath="/secure/certs/bank-keystore.jks"
+        keystorePassword="${secure::keystore.password}"
+        certificateAlias="swift-client-cert"
+        
+        <!-- ✅ TRUSTSTORE (SWIFT Network CA) -->
+        truststorePath="/secure/certs/swift-truststore.jks"
+        truststorePassword="${secure::truststore.password}"
+        
+        <!-- ✅ MTLS Settings -->
+        clientCertRequired="true"
+        sslProtocol="TLSv1.2"
+        cipherSuites="TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256">
+        
+        <reconnection>
+            <reconnect frequency="5000" count="3"/>
+        </reconnection>
+    </swift:connection>
+</swift:config>
+```
+
+#### Hardware Security Module (HSM) Configuration (Recommended)
+
+```xml
+<swift:config name="SWIFT_HSM_Config">
+    <swift:connection 
+        host="swift.production.bank.com"
+        port="3000"
+        bicCode="BANKUS33XXX"
+        username="${swift.username}"
+        password="${secure::swift.password}"
+        enableTls="true"
+        
+        <!-- ✅ HSM Integration (for LAU Signing) -->
+        hsmEnabled="true"
+        hsmProvider="sun.security.pkcs11.SunPKCS11"
+        hsmConfigPath="/etc/pkcs11/swift-hsm.cfg"
+        hsmPin="${secure::hsm.pin}"
+        
+        keystorePath="/secure/certs/bank-keystore.jks"
+        keystorePassword="${secure::keystore.password}"
+        truststorePath="/secure/certs/swift-truststore.jks"
+        truststorePassword="${secure::truststore.password}">
+        
+        <reconnection>
+            <reconnect frequency="5000" count="3"/>
+        </reconnection>
+    </swift:connection>
+</swift:config>
+```
+
+#### Connection Pooling (Automatic)
+
+**The connector implements `PoolingConnectionProvider` for automatic connection pooling.**
+
+**Benefits**:
+- ✅ Avoids re-authentication overhead for every message
+- ✅ Maintains stateful sessions with sequence synchronization
+- ✅ Automatic health checks and validation
+- ✅ CloudHub-compatible (distributed state via Object Store)
+
+**Pool Configuration** (in `mule-artifact.properties`):
+```properties
+# Connection pool settings (optional - defaults are production-ready)
+swift.connection.pool.maxActive=10
+swift.connection.pool.maxIdle=5
+swift.connection.pool.maxWait=30000
+swift.connection.pool.exhaustedAction=WHEN_EXHAUSTED_WAIT
+```
+
+**How Pooling Works**:
+1. First message → Connector establishes connection + authenticates
+2. Connection stored in pool (maintains session + sequence numbers)
+3. Subsequent messages → Reuse pooled connection (NO re-authentication)
+4. Connection validation → Automatic health checks via `@ConnectionValidator`
+5. Failed connection → Removed from pool, new connection created
 
 ### Basic Connection Configuration
 

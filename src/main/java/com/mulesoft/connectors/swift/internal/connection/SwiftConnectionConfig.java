@@ -24,7 +24,17 @@ public class SwiftConnectionConfig {
     private final String certificateAlias;
     private final int streamingThresholdBytes;
     private final int heartbeatInterval;
-    private final String messageEncoding; // ← BATTLE-SCARRED: Support legacy EBCDIC/ISO-8859-1
+    private final String messageEncoding;
+    
+    // Banking-Grade Security Parameters
+    private final boolean hsmEnabled;
+    private final String hsmProvider;
+    private final String hsmConfigPath;
+    private final String hsmPin;
+    private final boolean clientCertRequired;
+    private final boolean trustAllCerts;
+    private final String sslProtocol;
+    private final String cipherSuites;
 
     private SwiftConnectionConfig(Builder builder) {
         this.host = builder.host;
@@ -46,6 +56,14 @@ public class SwiftConnectionConfig {
         this.streamingThresholdBytes = builder.streamingThresholdBytes;
         this.heartbeatInterval = builder.heartbeatInterval;
         this.messageEncoding = builder.messageEncoding;
+        this.hsmEnabled = builder.hsmEnabled;
+        this.hsmProvider = builder.hsmProvider;
+        this.hsmConfigPath = builder.hsmConfigPath;
+        this.hsmPin = builder.hsmPin;
+        this.clientCertRequired = builder.clientCertRequired;
+        this.trustAllCerts = builder.trustAllCerts;
+        this.sslProtocol = builder.sslProtocol;
+        this.cipherSuites = builder.cipherSuites;
     }
 
     public static Builder builder() {
@@ -72,6 +90,16 @@ public class SwiftConnectionConfig {
     public int getStreamingThresholdBytes() { return streamingThresholdBytes; }
     public int getHeartbeatInterval() { return heartbeatInterval; }
     public String getMessageEncoding() { return messageEncoding; }
+    
+    // Banking-Grade Security Getters
+    public boolean isHsmEnabled() { return hsmEnabled; }
+    public String getHsmProvider() { return hsmProvider; }
+    public String getHsmConfigPath() { return hsmConfigPath; }
+    public String getHsmPin() { return hsmPin; }
+    public boolean isClientCertRequired() { return clientCertRequired; }
+    public boolean isTrustAllCerts() { return trustAllCerts; }
+    public String getSslProtocol() { return sslProtocol; }
+    public String getCipherSuites() { return cipherSuites; }
 
     public static class Builder {
         private String host;
@@ -93,6 +121,16 @@ public class SwiftConnectionConfig {
         private int streamingThresholdBytes = 50 * 1024 * 1024; // 50MB default
         private int heartbeatInterval = 60000; // 60 seconds default
         private String messageEncoding = "UTF-8"; // ← DEFAULT: Modern SWIFT uses UTF-8
+        
+        // Banking-Grade Security Builder Fields
+        private boolean hsmEnabled = false;
+        private String hsmProvider;
+        private String hsmConfigPath;
+        private String hsmPin;
+        private boolean clientCertRequired = true;
+        private boolean trustAllCerts = false;
+        private String sslProtocol = "TLSv1.2";
+        private String cipherSuites;
 
         public Builder host(String host) {
             this.host = host;
@@ -186,6 +224,47 @@ public class SwiftConnectionConfig {
 
         public Builder messageEncoding(String messageEncoding) {
             this.messageEncoding = messageEncoding;
+            return this;
+        }
+        
+        // Banking-Grade Security Builder Methods
+        public Builder hsmEnabled(boolean hsmEnabled) {
+            this.hsmEnabled = hsmEnabled;
+            return this;
+        }
+        
+        public Builder hsmProvider(String hsmProvider) {
+            this.hsmProvider = hsmProvider;
+            return this;
+        }
+        
+        public Builder hsmConfigPath(String hsmConfigPath) {
+            this.hsmConfigPath = hsmConfigPath;
+            return this;
+        }
+        
+        public Builder hsmPin(String hsmPin) {
+            this.hsmPin = hsmPin;
+            return this;
+        }
+        
+        public Builder clientCertRequired(boolean clientCertRequired) {
+            this.clientCertRequired = clientCertRequired;
+            return this;
+        }
+        
+        public Builder trustAllCerts(boolean trustAllCerts) {
+            this.trustAllCerts = trustAllCerts;
+            return this;
+        }
+        
+        public Builder sslProtocol(String sslProtocol) {
+            this.sslProtocol = sslProtocol;
+            return this;
+        }
+        
+        public Builder cipherSuites(String cipherSuites) {
+            this.cipherSuites = cipherSuites;
             return this;
         }
 
