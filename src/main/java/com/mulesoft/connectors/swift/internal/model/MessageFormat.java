@@ -12,6 +12,11 @@ public enum MessageFormat {
     /**
      * MX - ISO 20022 XML format
      */
-    MX
+    MX,
+    
+    /**
+     * UNKNOWN - Unable to detect format
+     */
+    UNKNOWN
 }
 

@@ -58,6 +58,85 @@
         </pluginRepository>
     </pluginRepositories>
 
+    <!-- ============================================= -->
+    <!-- SWIFT Standards Release (SR) Profiles        -->
+    <!-- Professional connectors support multiple SRs  -->
+    <!-- ============================================= -->
+    <profiles>
+        <!-- SR 2024 (November 2024) - Latest -->
+        <profile>
+            <id>sr2024</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <properties>
+                <swift.standards.release>SR2024</swift.standards.release>
+                <swift.standards.version>2024.11</swift.standards.version>
+                <swift.mt.schema.version>2024</swift.mt.schema.version>
+                <swift.mx.schema.version>2024</swift.mx.schema.version>
+            </properties>
+        </profile>
+
+        <!-- SR 2023 (November 2023) - Previous year -->
+        <profile>
+            <id>sr2023</id>
+            <properties>
+                <swift.standards.release>SR2023</swift.standards.release>
+                <swift.standards.version>2023.11</swift.standards.version>
+                <swift.mt.schema.version>2023</swift.mt.schema.version>
+                <swift.mx.schema.version>2023</swift.mx.schema.version>
+            </properties>
+        </profile>
+
+        <!-- SR 2022 (November 2022) - Legacy support -->
+        <profile>
+            <id>sr2022</id>
+            <properties>
+                <swift.standards.release>SR2022</swift.standards.release>
+                <swift.standards.version>2022.11</swift.standards.version>
+                <swift.mt.schema.version>2022</swift.mt.schema.version>
+                <swift.mx.schema.version>2022</swift.mx.schema.version>
+            </properties>
+        </profile>
+
+        <!-- Development Profile (with debug logging) -->
+        <profile>
+            <id>dev</id>
+            <properties>
+                <maven.test.skip>false</maven.test.skip>
+                <slf4j.version>2.0.16</slf4j.version>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-simple</artifactId>
+                    <version>${slf4j.version}</version>
+                    <scope>test</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+
+        <!-- Production Profile (optimized) -->
+        <profile>
+            <id>prod</id>
+            <properties>
+                <maven.test.skip>true</maven.test.skip>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-compiler-plugin</artifactId>
+                        <configuration>
+                            <optimize>true</optimize>
+                            <debug>false</debug>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
     <dependencies>
         <!-- Security - BouncyCastle for digital signatures -->
         <dependency>
