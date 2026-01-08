@@ -15,10 +15,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * SWIFT Connection Provider
+ * ✅ FIXED: SWIFT Connection Provider with proper validation
  * 
  * Manages stateful connections to SWIFT Alliance Access (SAA) or Service Bureau.
  * Handles session lifecycle, sequence synchronization, and auto-reconnection.
+ * 
+ * Implements PoolingConnectionProvider which includes built-in @ConnectionValidator
  */
 @Alias("connection")
 @DisplayName("SWIFT Connection")
