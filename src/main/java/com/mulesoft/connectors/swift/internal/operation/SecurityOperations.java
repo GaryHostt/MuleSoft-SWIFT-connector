@@ -1,6 +1,7 @@
 package com.mulesoft.connectors.swift.internal.operation;
 
 import com.mulesoft.connectors.swift.internal.connection.SwiftConnection;
+import com.mulesoft.connectors.swift.internal.error.SwiftErrorType;
 import com.mulesoft.connectors.swift.internal.model.*;
 import org.mule.runtime.extension.api.annotation.error.Throws;
 import org.mule.runtime.extension.api.annotation.param.Connection;
@@ -9,6 +10,7 @@ import org.mule.runtime.extension.api.annotation.param.Optional;
 import org.mule.runtime.extension.api.annotation.param.display.DisplayName;
 import org.mule.runtime.extension.api.annotation.param.display.Password;
 import org.mule.runtime.extension.api.annotation.param.display.Summary;
+import org.mule.runtime.extension.api.exception.ModuleException;
 import org.mule.runtime.extension.api.runtime.operation.Result;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -147,9 +149,13 @@ public class SecurityOperations {
             @Optional(defaultValue = "WORLDCHECK")
             @DisplayName("Screening Provider")
             @Summary("Sanctions screening provider")
-            String screeningProvider) throws Exception {
+            String screeningProvider,
+            @Optional(defaultValue = "false")
+            @DisplayName("Fail on Match")
+            @Summary("Throw exception if sanctions match detected (recommended for production)")
+            boolean failOnMatch) throws Exception {
 
-        LOGGER.info("Screening transaction with provider: {}", screeningProvider);
+        LOGGER.info("Screening transaction with provider: {} (failOnMatch={})", screeningProvider, failOnMatch);
 
         // Call screening API (simplified - real implementation would call external service)
         ScreeningResponse response = performSanctionsScreening(transactionData, screeningProvider);
@@ -159,6 +165,22 @@ public class SecurityOperations {
         } else {
             LOGGER.warn("Transaction flagged by sanctions screening: {} matches found", 
                 response.getMatchCount());
+            
+            // ✅ NEW: Throw BUSINESS_RULE_VIOLATION if failOnMatch is enabled
+            if (failOnMatch) {
+                String errorMessage = String.format(
+                    "Sanctions screening failed: %d match(es) detected by %s. Transaction cannot proceed.",
+                    response.getMatchCount(),
+                    screeningProvider
+                );
+                
+                LOGGER.error(errorMessage);
+                
+                throw new ModuleException(
+                    SwiftErrorType.SANCTIONS_VIOLATION,
+                    new Exception(errorMessage)
+                );
+            }
         }
 
         MessageAttributes attributes = new MessageAttributes();

@@ -1,6 +1,7 @@
 package com.mulesoft.connectors.swift.internal.operation;
 
 import com.mulesoft.connectors.swift.internal.connection.SwiftConnection;
+import com.mulesoft.connectors.swift.internal.error.SwiftErrorType;
 import com.mulesoft.connectors.swift.internal.model.*;
 import org.mule.runtime.extension.api.annotation.error.Throws;
 import org.mule.runtime.extension.api.annotation.param.Connection;
@@ -8,6 +9,7 @@ import org.mule.runtime.extension.api.annotation.param.Content;
 import org.mule.runtime.extension.api.annotation.param.Optional;
 import org.mule.runtime.extension.api.annotation.param.display.DisplayName;
 import org.mule.runtime.extension.api.annotation.param.display.Summary;
+import org.mule.runtime.extension.api.exception.ModuleException;
 import org.mule.runtime.extension.api.runtime.operation.Result;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,9 +58,14 @@ public class TransformationOperations {
             @Optional(defaultValue = "SR2024")
             @DisplayName("Standard Release")
             @Summary("SWIFT Standard Release (e.g., SR2023, SR2024)")
-            String standardRelease) throws Exception {
+            String standardRelease,
+            @Optional(defaultValue = "false")
+            @DisplayName("Fail on Error")
+            @Summary("Throw exception on validation failure (recommended for production)")
+            boolean failOnError) throws Exception {
 
-        LOGGER.info("Validating message: type={}, format={}, SR={}", messageType, format, standardRelease);
+        LOGGER.info("Validating message: type={}, format={}, SR={}, failOnError={}", 
+            messageType, format, standardRelease, failOnError);
 
         ValidationResponse response = new ValidationResponse();
         response.setMessageType(messageType);
@@ -80,10 +87,36 @@ public class TransformationOperations {
         response.setWarnings(warnings);
         response.setValid(errors.isEmpty());
 
+        // ✅ NEW: Throw categorized error if failOnError is enabled
+        if (!response.isValid() && failOnError) {
+            // Determine if errors are syntax or business rule violations
+            boolean allSyntaxErrors = errors.stream()
+                .allMatch(e -> "SYNTAX".equals(e.getCategory()));
+            
+            SwiftErrorType errorType = allSyntaxErrors 
+                ? SwiftErrorType.SYNTAX_ERROR 
+                : SwiftErrorType.BUSINESS_RULE_VIOLATION;
+            
+            String errorSummary = String.format(
+                "Validation failed with %d %s error(s) for %s: %s",
+                errors.size(),
+                allSyntaxErrors ? "SYNTAX" : "BUSINESS RULE",
+                messageType,
+                errors.get(0).getMessage()
+            );
+            
+            LOGGER.error(errorSummary);
+            
+            throw new ModuleException(
+                errorType,
+                new Exception(errorSummary)
+            );
+        }
+
         if (response.isValid()) {
             LOGGER.info("Message validation successful");
         } else {
-            LOGGER.warn("Message validation failed with {} errors", errors.size());
+            LOGGER.warn("Message validation failed with {} errors (failOnError=false, continuing)", errors.size());
         }
 
         // Create attributes
@@ -269,12 +302,12 @@ public class TransformationOperations {
         // - Network validation rules
 
         if (content == null || content.trim().isEmpty()) {
-            errors.add(new ValidationError("E001", "Message content is empty", "content"));
+            errors.add(new ValidationError("E001", "Message content is empty", "content", "SYNTAX"));
         }
 
-        // Example validations
+        // Example validations (SYNTAX errors)
         if (!content.contains(":20:")) {
-            errors.add(new ValidationError("E002", "Mandatory field :20: (Reference) is missing", "field20"));
+            errors.add(new ValidationError("E002", "Mandatory field :20: (Reference) is missing", "field20", "SYNTAX"));
         }
 
         if (content.length() > 10000) {
@@ -286,11 +319,11 @@ public class TransformationOperations {
                                    List<ValidationError> errors, List<ValidationWarning> warnings) {
         // XML schema validation for ISO 20022
         if (!content.trim().startsWith("<")) {
-            errors.add(new ValidationError("E003", "MX message must be valid XML", "content"));
+            errors.add(new ValidationError("E003", "MX message must be valid XML", "content", "SYNTAX"));
         }
 
         if (!content.contains("xmlns")) {
-            errors.add(new ValidationError("E004", "XML namespace declaration missing", "content"));
+            errors.add(new ValidationError("E004", "XML namespace declaration missing", "content", "SYNTAX"));
         }
     }
 

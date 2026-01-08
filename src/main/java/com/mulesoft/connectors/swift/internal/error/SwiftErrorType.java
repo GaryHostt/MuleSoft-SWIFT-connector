@@ -11,6 +11,15 @@ import java.util.Optional;
  */
 public enum SwiftErrorType implements ErrorTypeDefinition<SwiftErrorType> {
     
+    // === ERROR CATEGORIES (NEW) ===
+    // Parser/Format Errors (Malformed Messages)
+    // Use in Mule flows: <on-error-continue type="SWIFT:SYNTAX_ERROR"> → Alert dev team, no retry
+    SYNTAX_ERROR,
+    
+    // Business Logic Errors (Valid Message, Invalid Business Rules)
+    // Use in Mule flows: <on-error-continue type="SWIFT:BUSINESS_RULE_VIOLATION"> → Retry with backoff
+    BUSINESS_RULE_VIOLATION,
+    
     // Connection & Session Errors
     CONNECTION_FAILED(MuleErrors.CONNECTIVITY),
     CONNECTION_ERROR(MuleErrors.CONNECTIVITY),
@@ -19,13 +28,13 @@ public enum SwiftErrorType implements ErrorTypeDefinition<SwiftErrorType> {
     AUTHENTICATION_FAILED(MuleErrors.CONNECTIVITY),
     SEQUENCE_MISMATCH(MuleErrors.CONNECTIVITY),
     
-    // Message Validation Errors
-    INVALID_MESSAGE_FORMAT,
-    SCHEMA_VALIDATION_FAILED,
-    INVALID_BIC_CODE,
-    INVALID_CURRENCY_CODE,
-    FIELD_LENGTH_EXCEEDED,
-    MANDATORY_FIELD_MISSING,
+    // Message Validation Errors → SYNTAX_ERROR
+    INVALID_MESSAGE_FORMAT(SYNTAX_ERROR),
+    SCHEMA_VALIDATION_FAILED(SYNTAX_ERROR),
+    INVALID_BIC_CODE(SYNTAX_ERROR),
+    INVALID_CURRENCY_CODE(SYNTAX_ERROR),
+    FIELD_LENGTH_EXCEEDED(SYNTAX_ERROR),
+    MANDATORY_FIELD_MISSING(SYNTAX_ERROR),
     
     // Network Acknowledgment Errors
     MESSAGE_REJECTED,
@@ -34,12 +43,12 @@ public enum SwiftErrorType implements ErrorTypeDefinition<SwiftErrorType> {
     ACK_TIMEOUT,            // No ACK/NACK received within timeout period
     DUPLICATE_MESSAGE,
     
-    // Business Errors
-    INSUFFICIENT_FUNDS,
-    ACCOUNT_NOT_FOUND,
-    CUTOFF_TIME_EXCEEDED,
-    HOLIDAY_CALENDAR_VIOLATION,
-    SANCTIONS_SCREENING_FAILED,
+    // Business Errors → BUSINESS_RULE_VIOLATION
+    INSUFFICIENT_FUNDS(BUSINESS_RULE_VIOLATION),
+    ACCOUNT_NOT_FOUND(BUSINESS_RULE_VIOLATION),
+    CUTOFF_TIME_EXCEEDED(BUSINESS_RULE_VIOLATION),
+    HOLIDAY_CALENDAR_VIOLATION(BUSINESS_RULE_VIOLATION),
+    SANCTIONS_SCREENING_FAILED(BUSINESS_RULE_VIOLATION),
     
     // gpi Specific Errors
     GPI_TRACKING_NOT_AVAILABLE,
@@ -52,9 +61,9 @@ public enum SwiftErrorType implements ErrorTypeDefinition<SwiftErrorType> {
     UNSUPPORTED_MESSAGE_TYPE,
     
     // Security & Compliance Errors
-    SIGNATURE_VERIFICATION_FAILED,
-    LAU_AUTHENTICATION_FAILED,
-    SANCTIONS_VIOLATION,
+    SIGNATURE_VERIFICATION_FAILED(SYNTAX_ERROR),
+    LAU_AUTHENTICATION_FAILED(SYNTAX_ERROR),
+    SANCTIONS_VIOLATION(BUSINESS_RULE_VIOLATION),
     ENCRYPTION_FAILED,
     CERTIFICATE_EXPIRED,
     HSM_UNAVAILABLE,

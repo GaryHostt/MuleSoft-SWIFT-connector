@@ -3,12 +3,14 @@
       xmlns:swift="http://www.mulesoft.org/schema/mule/swift"
       xmlns:http="http://www.mulesoft.org/schema/mule/http"
       xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:file="http://www.mulesoft.org/schema/mule/file"
       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
       xsi:schemaLocation="
         http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
         http://www.mulesoft.org/schema/mule/swift http://www.mulesoft.org/schema/mule/swift/current/mule-swift.xsd
         http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
-        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd">
 
     <!-- Configuration Properties -->
     <configuration-properties file="config.properties"/>
@@ -40,6 +42,11 @@
             </reconnection>
         </swift:connection>
     </swift:config>
+
+    <!-- File Connector Configuration for Asynchronous Polling -->
+    <file:config name="File_Config">
+        <file:connection workingDir="${user.home}/Desktop/swift-inbox" />
+    </file:config>
 
     <!-- ==================================== -->
     <!-- API: Send SWIFT Payment (MT103)     -->
@@ -169,30 +176,135 @@
         
         <logger level="INFO" message="Validating message: #[payload.messageType]" />
         
-        <!-- Validate schema -->
-        <swift:validate-schema config-ref="SWIFT_Config"
-            messageType="#[payload.messageType]"
-            format="#[payload.format default 'MT']"
-            standardRelease="SR2024" />
+        <!-- ✅ NEW: Enhanced validation with categorized error handling -->
+        <try>
+            <!-- Validate schema with categorized error handling -->
+            <swift:validate-schema config-ref="SWIFT_Config"
+                messageType="#[payload.messageType]"
+                format="#[payload.format default 'MT']"
+                standardRelease="SR2024" />
+            
+            <!-- Transform response -->
+            <set-payload value="#[{
+                valid: payload.valid,
+                messageType: payload.messageType,
+                format: payload.format,
+                standardRelease: payload.standardRelease,
+                errors: payload.errors map {
+                    code: $.code,
+                    message: $.message,
+                    field: $.field,
+                    category: $.category
+                },
+                warnings: payload.warnings map {
+                    code: $.code,
+                    message: $.message,
+                    field: $.field
+                },
+                timestamp: payload.validationTimestamp as String
+            }]" />
+            
+            <error-handler>
+                <!-- ✅ SYNTAX_ERROR: Malformed message (no retry) -->
+                <on-error-continue type="SWIFT:SYNTAX_ERROR">
+                    <logger level="ERROR" 
+                        message="❌ SYNTAX ERROR: Message is malformed - #[error.description]" 
+                        category="com.mulesoft.swift.validation"/>
+                    
+                    <!-- Alert dev team (example: would send email/Slack in production) -->
+                    <logger level="ERROR" 
+                        message="🚨 DEV ALERT: Fix message format at source. No retry will be attempted." />
+                    
+                    <set-payload value="#[{
+                        error: 'SYNTAX_ERROR',
+                        message: error.description,
+                        category: 'MALFORMED_MESSAGE',
+                        retryable: false,
+                        action: 'Contact development team to fix message format',
+                        timestamp: now() as String
+                    }]" />
+                    <set-variable variableName="httpStatus" value="400" />
+                </on-error-continue>
+                
+                <!-- ✅ BUSINESS_RULE_VIOLATION: Valid syntax but failed business rules (retry eligible) -->
+                <on-error-continue type="SWIFT:BUSINESS_RULE_VIOLATION">
+                    <logger level="WARN" 
+                        message="⚠️ BUSINESS RULE VIOLATION: #[error.description]" 
+                        category="com.mulesoft.swift.validation"/>
+                    
+                    <!-- Retry logic for business rule violations -->
+                    <logger level="WARN" 
+                        message="💡 BUSINESS ALERT: May be retried after correcting business data (e.g., cutoff time, holiday)" />
+                    
+                    <set-payload value="#[{
+                        error: 'BUSINESS_RULE_VIOLATION',
+                        message: error.description,
+                        category: 'BUSINESS_LOGIC_FAILURE',
+                        retryable: true,
+                        action: 'Retry after business hours or on next business day',
+                        timestamp: now() as String
+                    }]" />
+                    <set-variable variableName="httpStatus" value="422" />
+                </on-error-continue>
+            </error-handler>
+        </try>
         
-        <!-- Transform response -->
-        <set-payload value="#[{
-            valid: payload.valid,
-            messageType: payload.messageType,
-            format: payload.format,
-            standardRelease: payload.standardRelease,
-            errors: payload.errors map {
-                code: $.code,
-                message: $.message,
-                field: $.field
-            },
-            warnings: payload.warnings map {
-                code: $.code,
-                message: $.message,
-                field: $.field
-            },
-            timestamp: payload.validationTimestamp as String
-        }]" />
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+    </flow>
+
+    <!-- ==================================== -->
+    <!-- ✅ NEW: Sanctions Screening Demo     -->
+    <!-- POST /api/screen                     -->
+    <!-- Demonstrates BUSINESS_RULE_VIOLATION -->
+    <!-- ==================================== -->
+    <flow name="sanctions-screening-demo-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/screen" allowedMethods="POST" />
+        
+        <logger level="INFO" message="Screening transaction: #[payload]" />
+        
+        <try>
+            <!-- Screen with production mode (will demonstrate error handling) -->
+            <swift:screen-transaction config-ref="SWIFT_Config"
+                screeningProvider="WORLDCHECK" />
+            
+            <!-- Success response -->
+            <set-payload value="#[{
+                passed: true,
+                message: 'Transaction passed sanctions screening',
+                timestamp: now() as String
+            }]" />
+            <set-variable variableName="httpStatus" value="200" />
+            
+            <error-handler>
+                <!-- ✅ SANCTIONS_VIOLATION: Block transaction immediately -->
+                <on-error-continue type="SWIFT:SANCTIONS_VIOLATION">
+                    <logger level="ERROR" 
+                        message="🚫 SANCTIONS VIOLATION: Transaction blocked - #[error.description]" 
+                        category="com.mulesoft.swift.compliance"/>
+                    
+                    <!-- Alert compliance team -->
+                    <logger level="ERROR" 
+                        message="🚨 COMPLIANCE ALERT: Sanctions match detected. Transaction blocked. Manual review required." />
+                    
+                    <!-- Retry with backoff (may be transient false positive) -->
+                    <until-successful maxRetries="2" millisBetweenRetries="300000">
+                        <logger level="INFO" message="Retrying sanctions screening (attempt #[vars.retryCount + 1])..." />
+                        <swift:screen-transaction config-ref="SWIFT_Config"
+                            screeningProvider="WORLDCHECK" />
+                    </until-successful>
+                    
+                    <set-payload value="#[{
+                        error: 'SANCTIONS_VIOLATION',
+                        message: error.description,
+                        category: 'BUSINESS_RULE_VIOLATION',
+                        retryable: true,
+                        action: 'Manual compliance review required',
+                        timestamp: now() as String
+                    }]" />
+                    <set-variable variableName="httpStatus" value="403" />
+                </on-error-continue>
+            </error-handler>
+        </try>
         
         <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
     </flow>
@@ -354,6 +466,640 @@
         
         <!-- Process the payment (your business logic here) -->
         <logger level="INFO" message="Processing payment..." />
+    </flow>
+
+    <!-- ============================================================ -->
+    <!-- ✅ PRODUCTION PATTERN 1: File Polling (Asynchronous)        -->
+    <!-- Demonstrates realistic SWIFT integration via file drop       -->
+    <!-- Simulates: Bank SFTP → File Poller → SWIFT Connector        -->
+    <!-- ============================================================ -->
+    <flow name="file-polling-mt103-flow" initialState="started">
+        <file:listener config-ref="File_Config" 
+            directory="inbox"
+            autoDelete="false"
+            moveToDirectory="processed"
+            recursive="false">
+            <scheduling-strategy>
+                <fixed-frequency frequency="5000"/> <!-- Poll every 5 seconds -->
+            </scheduling-strategy>
+            <file:matcher filenamePattern="*.mt103" />
+        </file:listener>
+        
+        <logger level="INFO" message="📁 File detected: #[attributes.fileName] (Size: #[attributes.size] bytes)" 
+            category="com.mulesoft.swift.filepoller"/>
+        
+        <set-variable variableName="originalFileName" value="#[attributes.fileName]" />
+        <set-variable variableName="fileTimestamp" value="#[now()]" />
+        
+        <!-- Parse file content as MT103 -->
+        <set-payload value="#[payload]" encoding="UTF-8" />
+        
+        <try>
+            <!-- ✅ STEP 1: Pre-Validate Message (BEFORE sending to SWIFT) -->
+            <logger level="INFO" message="🔍 Pre-validating MT103 message..." />
+            
+            <swift:validate-schema config-ref="SWIFT_Config"
+                messageType="MT103"
+                format="MT"
+                standardRelease="SR2024" />
+            
+            <logger level="INFO" message="✅ Validation passed: #[payload.valid]" />
+            
+            <!-- ✅ STEP 2: Extract Multi-Block Data (Block 1, 3, 4) -->
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    // Extract Block 1 (Basic Header) - Institution identification
+    block1: do {
+        var block1Match = payload match /\{1:(.*?)\}/
+        ---
+        if (block1Match != null) block1Match[1] else null
+    },
+    
+    // Extract Block 3 (User Header) - UETR for end-to-end tracking
+    block3: do {
+        var block3Match = payload match /\{3:(.*?)\}/
+        var uetrMatch = payload match /:121:([0-9a-f\-]{36})/
+        ---
+        {
+            raw: if (block3Match != null) block3Match[1] else null,
+            uetr: if (uetrMatch != null) uetrMatch[1] else null
+        }
+    },
+    
+    // Extract Block 4 (Message Body) - Payment details
+    block4: do {
+        var ref = payload match /:20:(.*?)[\n:]/
+        var amount = payload match /:32A:(\d{6})([A-Z]{3})([\d,\.]+)/
+        var ordering = payload match /:50K:(.*?)(?=:\d{2}[A-Z]?:|$)/
+        var beneficiary = payload match /:59:(.*?)(?=:\d{2}[A-Z]?:|$)/
+        ---
+        {
+            reference: if (ref != null) ref[1] else null,
+            valueDate: if (amount != null) amount[1] else null,
+            currency: if (amount != null) amount[2] else null,
+            amount: if (amount != null) amount[3] else null,
+            orderingCustomer: if (ordering != null) ordering[1] else null,
+            beneficiary: if (beneficiary != null) beneficiary[1] else null
+        }
+    },
+    
+    fileName: vars.originalFileName,
+    processedAt: vars.fileTimestamp as String
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            
+            <logger level="INFO" message="📋 Extracted Data - Ref: #[payload.block4.reference], Amount: #[payload.block4.currency] #[payload.block4.amount], UETR: #[payload.block3.uetr]" />
+            
+            <!-- ✅ STEP 3: Send to SWIFT Network -->
+            <set-variable variableName="parsedPayload" value="#[payload]" />
+            
+            <swift:send-message config-ref="SWIFT_Config"
+                messageType="MT103"
+                sender="${swift.bic}"
+                receiver="BANKDE33XXX"
+                format="MT"
+                priority="NORMAL" />
+            
+            <logger level="INFO" message="✅ Message sent: #[payload.messageId], Sequence: #[attributes.sequenceNumber]" />
+            
+            <!-- Write success audit log -->
+            <file:write config-ref="File_Config"
+                path="audit/#[vars.originalFileName].success.json">
+                <file:content><![CDATA[#[output application/json --- {
+                    fileName: vars.originalFileName,
+                    messageId: payload.messageId,
+                    sequenceNumber: attributes.sequenceNumber,
+                    uetr: vars.parsedPayload.block3.uetr,
+                    reference: vars.parsedPayload.block4.reference,
+                    amount: vars.parsedPayload.block4.amount,
+                    currency: vars.parsedPayload.block4.currency,
+                    status: "SENT",
+                    timestamp: now() as String
+                }]]]></file:content>
+            </file:write>
+            
+            <error-handler>
+                <!-- ✅ SYNTAX_ERROR: Message validation failed -->
+                <on-error-continue type="SWIFT:SYNTAX_ERROR">
+                    <logger level="ERROR" 
+                        message="❌ VALIDATION FAILED for #[vars.originalFileName]: #[error.description]" 
+                        category="com.mulesoft.swift.filepoller"/>
+                    
+                    <!-- Move to error folder with reason -->
+                    <file:write config-ref="File_Config"
+                        path="error/#[vars.originalFileName].error.json">
+                        <file:content><![CDATA[#[output application/json --- {
+                            fileName: vars.originalFileName,
+                            errorType: "SYNTAX_ERROR",
+                            errorMessage: error.description,
+                            action: "Fix message format and resubmit",
+                            timestamp: now() as String
+                        }]]]></file:content>
+                    </file:write>
+                    
+                    <!-- Alert operations team -->
+                    <logger level="ERROR" message="🚨 File moved to error folder: #[vars.originalFileName]" />
+                </on-error-continue>
+                
+                <!-- ✅ NACK_RECEIVED: SWIFT network rejected -->
+                <on-error-continue type="SWIFT:NACK_RECEIVED">
+                    <logger level="ERROR" 
+                        message="❌ NACK RECEIVED for #[vars.originalFileName]: #[error.description]" 
+                        category="com.mulesoft.swift.filepoller"/>
+                    
+                    <!-- Parse NACK reason code -->
+                    <swift:parse-reject-code config-ref="SWIFT_Config"
+                        rejectCode="K90"
+                        messageId="#[vars.originalFileName]" />
+                    
+                    <file:write config-ref="File_Config"
+                        path="nack/#[vars.originalFileName].nack.json">
+                        <file:content><![CDATA[#[output application/json --- {
+                            fileName: vars.originalFileName,
+                            errorType: "NACK_RECEIVED",
+                            rejectCode: payload.rejectCode,
+                            description: payload.description,
+                            recoverable: payload.recoverable,
+                            suggestedAction: payload.suggestedAction,
+                            timestamp: now() as String
+                        }]]]></file:content>
+                    </file:write>
+                </on-error-continue>
+            </error-handler>
+        </try>
+    </flow>
+
+    <!-- ============================================================ -->
+    <!-- ✅ PRODUCTION PATTERN 2: Pre-Validation Flow                -->
+    <!-- Validate-only endpoint (no transmission to SWIFT)           -->
+    <!-- Use Case: Pre-flight check before sending high-value txns   -->
+    <!-- ============================================================ -->
+    <flow name="validation-only-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/validate-only" allowedMethods="POST" />
+        
+        <logger level="INFO" message="🔍 Validation-only request: #[payload.messageType]" />
+        
+        <try>
+            <!-- Validate without sending -->
+            <swift:validate-schema config-ref="SWIFT_Config"
+                messageType="#[payload.messageType]"
+                format="#[payload.format default 'MT']"
+                standardRelease="SR2024" />
+            
+            <!-- ✅ Additional Business Rule Validation -->
+            <choice>
+                <when expression="#[payload.messageType == 'MT103']">
+                    <!-- Extract amount and check limits -->
+                    <set-variable variableName="amount" 
+                        value="#[payload.messageContent match /:32A:\d{6}[A-Z]{3}([\d,\.]+)/ default ['0']][0]" />
+                    
+                    <choice>
+                        <when expression="#[vars.amount as Number > 1000000]">
+                            <raise-error type="MULE:VALIDATION" 
+                                description="High-value payment (>1M) requires additional approval" />
+                        </when>
+                    </choice>
+                </when>
+            </choice>
+            
+            <!-- Transform to structured response -->
+            <ee:transform>
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    validationStatus: "PASSED",
+    messageType: payload.messageType,
+    format: payload.format,
+    standardRelease: payload.standardRelease,
+    errors: payload.errors map {
+        code: $.code,
+        message: $.message,
+        field: $.field,
+        category: $.category
+    },
+    warnings: payload.warnings map {
+        code: $.code,
+        message: $.message
+    },
+    readyToSend: payload.valid,
+    timestamp: now() as String
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+            
+            <set-variable variableName="httpStatus" value="200" />
+            
+            <error-handler>
+                <on-error-continue type="SWIFT:SYNTAX_ERROR">
+                    <ee:transform>
+                        <ee:message>
+                            <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    validationStatus: "FAILED",
+    errorCategory: "SYNTAX_ERROR",
+    errorMessage: error.description,
+    readyToSend: false,
+    action: "Fix message format before sending to SWIFT network",
+    timestamp: now() as String
+}]]></ee:set-payload>
+                        </ee:message>
+                    </ee:transform>
+                    <set-variable variableName="httpStatus" value="400" />
+                </on-error-continue>
+                
+                <on-error-continue type="SWIFT:BUSINESS_RULE_VIOLATION">
+                    <ee:transform>
+                        <ee:message>
+                            <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    validationStatus: "FAILED",
+    errorCategory: "BUSINESS_RULE_VIOLATION",
+    errorMessage: error.description,
+    readyToSend: false,
+    retryEligible: true,
+    action: "Correct business data (e.g., amount, approval) and retry",
+    timestamp: now() as String
+}]]></ee:set-payload>
+                        </ee:message>
+                    </ee:transform>
+                    <set-variable variableName="httpStatus" value="422" />
+                </on-error-continue>
+            </error-handler>
+        </try>
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+    </flow>
+
+    <!-- ============================================================ -->
+    <!-- ✅ PRODUCTION PATTERN 3: ISO 20022 (MX) Transformation      -->
+    <!-- MT-to-MX conversion for ISO 20022 migration                  -->
+    <!-- Demonstrates: Legacy MT103 → Modern pacs.008 XML             -->
+    <!-- ============================================================ -->
+    <flow name="mt-to-mx-conversion-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/transform/mt-to-mx" allowedMethods="POST" />
+        
+        <logger level="INFO" message="🔄 MT-to-MX conversion requested: #[payload.mtMessageType]" />
+        
+        <set-variable variableName="originalMtContent" value="#[payload.mtContent]" />
+        
+        <!-- Translate MT to MX -->
+        <swift:translate-mt-to-mx config-ref="SWIFT_Config"
+            mtMessageType="#[payload.mtMessageType]" />
+        
+        <logger level="INFO" message="✅ Translated: #[payload.mtMessageType] → #[payload.mxMessageType]" />
+        
+        <!-- ✅ DataWeave Metadata Demo: Parse MX XML and extract structured data -->
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+input payload application/xml
+---
+{
+    conversionSummary: {
+        sourceFormat: "MT",
+        targetFormat: "MX",
+        mtMessageType: payload.mtMessageType,
+        mxMessageType: payload.mxMessageType,
+        translationSuccess: payload.success,
+        timestamp: payload.translationTimestamp
+    },
+    
+    // ✅ Demonstrate MX XML parsing (ISO 20022 structure)
+    mxStructure: do {
+        var mxXml = read(payload.translatedContent, "application/xml")
+        ---
+        {
+            documentType: mxXml.Document.@xmlns,
+            messageId: mxXml.Document.*GrpHdr.MsgId default "N/A",
+            creationDateTime: mxXml.Document.*GrpHdr.CreDtTm default "N/A",
+            numberOfTransactions: mxXml.Document.*GrpHdr.NbOfTxs default "0",
+            
+            // Extract payment details (demonstrates drag-and-drop metadata)
+            paymentInfo: mxXml.Document.*CdtTrfTxInf map {
+                paymentId: $.PmtId.InstrId,
+                instructedAmount: $.IntrBkSttlmAmt.@Ccy ++ " " ++ $.IntrBkSttlmAmt,
+                debtor: $.Dbtr.Nm,
+                creditor: $.Cdtr.Nm
+            }
+        }
+    },
+    
+    // Original MT content for comparison
+    originalMT: vars.originalMtContent,
+    
+    // Full MX XML
+    mxXml: payload.translatedContent
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+    </flow>
+
+    <!-- ============================================================ -->
+    <!-- ✅ PRODUCTION PATTERN 4: MX-to-JSON Parsing                 -->
+    <!-- Parse ISO 20022 XML into JSON for modern systems             -->
+    <!-- Demonstrates: pacs.008 XML → JSON API response               -->
+    <!-- ============================================================ -->
+    <flow name="mx-to-json-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/parse/mx-to-json" allowedMethods="POST" />
+        
+        <logger level="INFO" message="📄 MX-to-JSON parsing requested" />
+        
+        <!-- ✅ Advanced DataWeave: Parse complex ISO 20022 XML structure -->
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+input payload application/xml
+---
+{
+    messageType: "ISO20022_pacs.008",
+    parsedAt: now() as String,
+    
+    // Group Header
+    groupHeader: {
+        messageId: payload.Document.*GrpHdr.MsgId,
+        creationDateTime: payload.Document.*GrpHdr.CreDtTm,
+        numberOfTransactions: payload.Document.*GrpHdr.NbOfTxs as Number,
+        settlementInformation: {
+            method: payload.Document.*GrpHdr.SttlmInf.SttlmMtd,
+            account: payload.Document.*GrpHdr.SttlmInf.SttlmAcct.Id.IBAN default "N/A"
+        }
+    },
+    
+    // Credit Transfer Transaction Information (array of payments)
+    transactions: payload.Document.*CdtTrfTxInf map {
+        paymentIdentification: {
+            instructionId: $.PmtId.InstrId,
+            endToEndId: $.PmtId.EndToEndId,
+            transactionId: $.PmtId.TxId,
+            uetr: $.PmtId.UETR default null // Unique End-to-end Transaction Reference
+        },
+        
+        settlementAmount: {
+            currency: $.IntrBkSttlmAmt.@Ccy,
+            amount: $.IntrBkSttlmAmt as Number
+        },
+        
+        valueDate: $.IntrBkSttlmDt,
+        
+        debtor: {
+            name: $.Dbtr.Nm,
+            account: $.DbtrAcct.Id.IBAN default $.DbtrAcct.Id.Othr.Id default "N/A",
+            agent: {
+                bic: $.DbtrAgt.FinInstnId.BICFI default "N/A",
+                name: $.DbtrAgt.FinInstnId.Nm default "N/A"
+            }
+        },
+        
+        creditor: {
+            name: $.Cdtr.Nm,
+            account: $.CdtrAcct.Id.IBAN default $.CdtrAcct.Id.Othr.Id default "N/A",
+            agent: {
+                bic: $.CdtrAgt.FinInstnId.BICFI default "N/A",
+                name: $.CdtrAgt.FinInstnId.Nm default "N/A"
+            }
+        },
+        
+        remittanceInformation: {
+            unstructured: $.RmtInf.Ustrd[0] default null,
+            structured: $.RmtInf.Strd.CdtrRefInf.Ref default null
+        },
+        
+        charges: {
+            bearer: $.ChrgBr default "SHAR", // Shared charges
+            details: $.ChrgsInf map {
+                amount: $.Amt.@Ccy ++ " " ++ $.Amt,
+                agent: $.Agt.FinInstnId.BICFI default "N/A"
+            }
+        }
+    },
+    
+    // Metadata for tracking
+    metadata: {
+        totalTransactions: sizeOf(payload.Document.*CdtTrfTxInf),
+        totalAmount: sum(payload.Document.*CdtTrfTxInf.*IntrBkSttlmAmt map $ as Number),
+        currencies: (payload.Document.*CdtTrfTxInf.*IntrBkSttlmAmt.@Ccy) distinctBy $,
+        processingMode: "ISO20022_NATIVE"
+    }
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+    </flow>
+
+    <!-- ============================================================ -->
+    <!-- ✅ PRODUCTION PATTERN 5: NACK Error Mapping                 -->
+    <!-- Parse SWIFT NACK codes and map to human-readable reasons    -->
+    <!-- Demonstrates: Reject code → Actionable remediation          -->
+    <!-- ============================================================ -->
+    <flow name="nack-error-mapping-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/nack/parse" allowedMethods="POST" />
+        
+        <logger level="INFO" message="🔍 Parsing NACK code: #[payload.rejectCode]" />
+        
+        <!-- Parse reject code using connector's dictionary -->
+        <swift:parse-reject-code config-ref="SWIFT_Config"
+            rejectCode="#[payload.rejectCode]"
+            messageId="#[payload.messageId default uuid()]" />
+        
+        <!-- ✅ Map to actionable response with remediation steps -->
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    rejectCode: payload.rejectCode,
+    severity: payload.category,
+    description: payload.description,
+    isRecoverable: payload.recoverable,
+    
+    // ✅ Actionable Remediation Mapping
+    remediation: do {
+        var code = payload.rejectCode
+        ---
+        if (code startsWith "K") {
+            // K-series: Message format errors
+            {
+                category: "FORMAT_ERROR",
+                action: payload.suggestedAction,
+                retryRecommendation: "Fix message format and resubmit",
+                alertTeam: "Development Team",
+                sla: "Fix within 2 hours"
+            }
+        } else if (code startsWith "D") {
+            // D-series: Delivery errors
+            {
+                category: "DELIVERY_ERROR",
+                action: "Check network connectivity and recipient BIC",
+                retryRecommendation: "Retry after verifying recipient details",
+                alertTeam: "Operations Team",
+                sla: "Retry within 30 minutes"
+            }
+        } else if (code startsWith "S") {
+            // S-series: Security/authentication errors
+            {
+                category: "SECURITY_ERROR",
+                action: "Verify digital signature and LAU credentials",
+                retryRecommendation: "Re-authenticate and retry",
+                alertTeam: "Security Team",
+                sla: "Investigate immediately"
+            }
+        } else {
+            {
+                category: "UNKNOWN_ERROR",
+                action: payload.suggestedAction,
+                retryRecommendation: "Contact SWIFT support",
+                alertTeam: "SWIFT Operations",
+                sla: "Escalate within 1 hour"
+            }
+        }
+    },
+    
+    // Provide historical context (mock data for demo)
+    historicalData: {
+        occurenceCount: 0, // Would query from database
+        lastOccurrence: null,
+        commonCause: "Field :32A format incorrect (date must be YYMMDD)"
+    },
+    
+    timestamp: now() as String
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
+    </flow>
+
+    <!-- ============================================================ -->
+    <!-- ✅ PRODUCTION PATTERN 6: Multi-Block Message Handling       -->
+    <!-- Extract and process all 5 SWIFT blocks                      -->
+    <!-- Demonstrates: Complete SWIFT FIN message parsing             -->
+    <!-- ============================================================ -->
+    <flow name="multi-block-parsing-flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/api/parse/multi-block" allowedMethods="POST" />
+        
+        <logger level="INFO" message="📋 Multi-block parsing requested" />
+        
+        <!-- ✅ Extract all 5 SWIFT blocks using DataWeave regex -->
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    messageType: "FIN_MT103",
+    
+    // Block 1: Basic Header (Institution Identification)
+    block1_basicHeader: do {
+        var match = payload match /\{1:(.*?)\}/
+        var content = if (match != null) match[1] else null
+        ---
+        {
+            raw: content,
+            applicationId: content[0 to 0],      // F = FIN
+            serviceId: content[1 to 2],           // 01 = FIN Service
+            logicalTerminal: content[3 to 14],    // BIC + LT identifier
+            sessionNumber: content[15 to 18],
+            sequenceNumber: content[19 to 24]
+        }
+    },
+    
+    // Block 2: Application Header (Message Routing)
+    block2_applicationHeader: do {
+        var match = payload match /\{2:(.*?)\}/
+        var content = if (match != null) match[1] else null
+        ---
+        {
+            raw: content,
+            ioIdentifier: content[0 to 0],         // I = Input, O = Output
+            messageType: content[1 to 3],          // 103 = Single Customer Credit
+            destinationBic: content[4 to 15],
+            priority: content[16 to 16],           // N = Normal, U = Urgent
+            deliveryMonitoring: content[17 to 17] default null
+        }
+    },
+    
+    // Block 3: User Header (Optional - UETR, Validation Flags)
+    block3_userHeader: do {
+        var match = payload match /\{3:(.*?)\}/
+        var content = if (match != null) match[1] else null
+        var uetrMatch = content match /:121:([0-9a-f\-]{36})/
+        var priorityMatch = content match /:103:([A-Z]{3})/
+        ---
+        {
+            raw: content,
+            uetr: if (uetrMatch != null) uetrMatch[1] else null,      // Unique End-to-end Transaction Reference
+            serviceType: if (priorityMatch != null) priorityMatch[1] else null,
+            validationFlag: content match /:119:/ != null             // STP validation
+        }
+    },
+    
+    // Block 4: Text (Message Body - Payment Details)
+    block4_textBlock: do {
+        var match = payload match /\{4:(.*?)-\}/
+        var content = if (match != null) match[1] else null
+        ---
+        {
+            raw: content,
+            fields: {
+                transactionReference: (content match /:20:(.*?)[\n:]/)[1] default null,
+                bankOperationCode: (content match /:23B:(.*?)[\n:]/)[1] default null,
+                valueDate: (content match /:32A:(\d{6})/)[1] default null,
+                currency: (content match /:32A:\d{6}([A-Z]{3})/)[1] default null,
+                amount: (content match /:32A:\d{6}[A-Z]{3}([\d,\.]+)/)[1] default null,
+                orderingCustomer: (content match /:50K:(.*?)(?=:\d{2}[A-Z]?:|$)/)[1] default null,
+                beneficiary: (content match /:59:(.*?)(?=:\d{2}[A-Z]?:|$)/)[1] default null,
+                remittanceInfo: (content match /:70:(.*?)(?=:\d{2}[A-Z]?:|$)/)[1] default null
+            }
+        }
+    },
+    
+    // Block 5: Trailer (System Information - MAC, Checksum)
+    block5_trailer: do {
+        var match = payload match /\{5:(.*?)\}/
+        var content = if (match != null) match[1] else null
+        var macMatch = content match /\{MAC:([A-F0-9]+)\}/
+        var chkMatch = content match /\{CHK:([A-F0-9]+)\}/
+        ---
+        {
+            raw: content,
+            mac: if (macMatch != null) macMatch[1] else null,         // Message Authentication Code
+            checksum: if (chkMatch != null) chkMatch[1] else null,    // Checksum for integrity
+            possibleDuplicateEmission: content match /\{PDE/ != null,
+            messageReference: (content match /\{MRF:(\d+)\}/)[1] default null
+        }
+    },
+    
+    // Validation Summary
+    validation: {
+        allBlocksPresent: payload contains "{1:" and payload contains "{2:" and payload contains "{4:",
+        hasUETR: payload contains ":121:",
+        hasMAC: payload contains "{MAC:",
+        messageIntegrity: "VALID" // Would verify MAC/CHK in production
+    },
+    
+    timestamp: now() as String
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        
+        <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
     </flow>
 
 </mule>

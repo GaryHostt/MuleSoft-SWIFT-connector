@@ -22,6 +22,8 @@ public class SwiftConnectionConfig {
     private final String keystorePath;
     private final String keystorePassword;
     private final String certificateAlias;
+    private final int streamingThresholdBytes;
+    private final int heartbeatInterval;
 
     private SwiftConnectionConfig(Builder builder) {
         this.host = builder.host;
@@ -40,6 +42,8 @@ public class SwiftConnectionConfig {
         this.keystorePath = builder.keystorePath;
         this.keystorePassword = builder.keystorePassword;
         this.certificateAlias = builder.certificateAlias;
+        this.streamingThresholdBytes = builder.streamingThresholdBytes;
+        this.heartbeatInterval = builder.heartbeatInterval;
     }
 
     public static Builder builder() {
@@ -63,6 +67,8 @@ public class SwiftConnectionConfig {
     public String getKeystorePath() { return keystorePath; }
     public String getKeystorePassword() { return keystorePassword; }
     public String getCertificateAlias() { return certificateAlias; }
+    public int getStreamingThresholdBytes() { return streamingThresholdBytes; }
+    public int getHeartbeatInterval() { return heartbeatInterval; }
 
     public static class Builder {
         private String host;
@@ -81,6 +87,8 @@ public class SwiftConnectionConfig {
         private String keystorePath;
         private String keystorePassword;
         private String certificateAlias;
+        private int streamingThresholdBytes = 50 * 1024 * 1024; // 50MB default
+        private int heartbeatInterval = 60000; // 60 seconds default
 
         public Builder host(String host) {
             this.host = host;
@@ -159,6 +167,16 @@ public class SwiftConnectionConfig {
 
         public Builder certificateAlias(String certificateAlias) {
             this.certificateAlias = certificateAlias;
+            return this;
+        }
+
+        public Builder streamingThresholdBytes(int streamingThresholdBytes) {
+            this.streamingThresholdBytes = streamingThresholdBytes;
+            return this;
+        }
+
+        public Builder heartbeatInterval(int heartbeatInterval) {
+            this.heartbeatInterval = heartbeatInterval;
             return this;
         }
 

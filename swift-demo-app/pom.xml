@@ -52,6 +52,14 @@
             <classifier>mule-plugin</classifier>
         </dependency>
         
+        <!-- File Connector for file polling patterns -->
+        <dependency>
+            <groupId>org.mule.connectors</groupId>
+            <artifactId>mule-file-connector</artifactId>
+            <version>1.5.1</version>
+            <classifier>mule-plugin</classifier>
+        </dependency>
+        
         <!-- SWIFT Connector -->
         <dependency>
             <groupId>com.mulesoft.connectors</groupId>
