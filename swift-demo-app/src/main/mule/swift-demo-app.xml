@@ -64,6 +64,9 @@
                 <set-variable variableName="httpStatus" value="400" />
             </when>
             <otherwise>
+                <!-- ✅ SAVE original payload before any transformations -->
+                <set-variable variableName="originalPayload" value="#[payload]" />
+                
                 <!-- Generate correlation ID for tracking -->
                 <swift:generate-correlation-id config-ref="SWIFT_Config"
                     businessTransactionId="#[payload.transactionId default uuid()]" />
@@ -75,19 +78,32 @@
                 <!-- Build MT103 message content -->
                 <set-payload value="#[
                     ':20:' ++ (payload.reference default uuid()) ++ '\n' ++
-                    ':32A:' ++ now() as String {format: 'yyMMdd'} ++ payload.currency ++ payload.amount ++ '\n' ++
-                    ':50K:' ++ payload.orderingCustomer ++ '\n' ++
-                    ':59:' ++ payload.beneficiary
+                    ':32A:' ++ now() as String {format: 'yyMMdd'} ++ (payload.currency default 'USD') ++ (payload.amount default '0') ++ '\n' ++
+                    ':50K:' ++ (payload.orderingCustomer default 'UNKNOWN') ++ '\n' ++
+                    ':59:' ++ (payload.beneficiary default 'UNKNOWN')
                 ]" />
+                
+                <!-- ✅ SAVE MT103 content before screening -->
+                <set-variable variableName="mt103Content" value="#[payload]" />
                 
                 <!-- Screen for sanctions before sending -->
                 <try>
                     <swift:screen-transaction config-ref="SWIFT_Config"
                         screeningProvider="WORLDCHECK" />
                     
+                    <!-- ✅ Transform screening response to avoid serialization issues -->
+                    <set-payload value="#[{
+                        passed: (payload.passed default false),
+                        matchCount: (payload.matchCount default 0),
+                        screeningProvider: (payload.screeningProvider default 'WORLDCHECK')
+                    }]" />
+                    
                     <choice>
                         <when expression="#[payload.passed]">
                             <logger level="INFO" message="Sanctions screening passed" />
+                            
+                            <!-- ✅ RESTORE MT103 content for sending -->
+                            <set-payload value="#[vars.mt103Content]" />
                             
                             <!-- Send SWIFT message -->
                             <swift:send-message config-ref="SWIFT_Config"
@@ -176,12 +192,17 @@
         
         <logger level="INFO" message="Validating message: #[payload.messageType]" />
         
+        <!-- ✅ Save values and clear payload -->
+        <set-variable variableName="msgType" value="#[payload.messageType]" />
+        <set-variable variableName="msgFormat" value="#[payload.format default 'MT']" />
+        <set-payload value="#['VALIDATING']" />
+        
         <!-- ✅ NEW: Enhanced validation with categorized error handling -->
         <try>
             <!-- Validate schema with categorized error handling -->
             <swift:validate-schema config-ref="SWIFT_Config"
-                messageType="#[payload.messageType]"
-                format="#[payload.format default 'MT']"
+                messageType="#[vars.msgType]"
+                format="#[vars.msgFormat]"
                 standardRelease="SR2024" />
             
             <!-- Transform response -->
@@ -262,6 +283,9 @@
         
         <logger level="INFO" message="Screening transaction: #[payload]" />
         
+        <!-- ✅ Clear payload before connector operation to avoid serialization issues -->
+        <set-payload value="#['SCREENING_REQUEST']" />
+        
         <try>
             <!-- Screen with production mode (will demonstrate error handling) -->
             <swift:screen-transaction config-ref="SWIFT_Config"
@@ -318,20 +342,33 @@
         
         <logger level="INFO" message="Translating MT to MX: #[payload.messageType]" />
         
+        <!-- ✅ Save message type before operation -->
+        <set-variable variableName="mtType" value="#[payload.messageType]" />
+        
+        <!-- ✅ Clear payload before connector operation to avoid serialization issues -->
+        <set-payload value="#[vars.mtType]" />
+        
         <!-- Translate -->
         <swift:translate-mt-to-mx config-ref="SWIFT_Config"
-            mtMessageType="#[payload.messageType]" />
+            mtMessageType="#[vars.mtType]" />
         
-        <!-- Transform response -->
-        <set-payload value="#[{
-            success: payload.success,
-            sourceFormat: payload.sourceFormat,
-            targetFormat: payload.targetFormat,
-            mtMessageType: payload.mtMessageType,
-            mxMessageType: payload.mxMessageType,
-            translatedContent: payload.translatedContent,
-            timestamp: payload.translationTimestamp as String
-        }]" />
+        <!-- ✅ Transform response immediately to avoid serialization issues -->
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: (payload.success default false) as Boolean,
+    sourceFormat: (payload.sourceFormat default 'MT') as String,
+    targetFormat: (payload.targetFormat default 'MX') as String,
+    mtMessageType: (payload.mtMessageType default 'UNKNOWN') as String,
+    mxMessageType: (payload.mxMessageType default 'UNKNOWN') as String,
+    translatedContent: (payload.translatedContent default '') as String,
+    timestamp: now() as String
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
         
         <set-payload value="#[output application/json --- payload]" mimeType="application/json" />
     </flow>
@@ -644,11 +681,16 @@ output application/json
         
         <logger level="INFO" message="🔍 Validation-only request: #[payload.messageType]" />
         
+        <!-- ✅ Save values and clear payload -->
+        <set-variable variableName="msgType" value="#[payload.messageType]" />
+        <set-variable variableName="msgFormat" value="#[payload.format default 'MT']" />
+        <set-payload value="#['VALIDATING']" />
+        
         <try>
             <!-- Validate without sending -->
             <swift:validate-schema config-ref="SWIFT_Config"
-                messageType="#[payload.messageType]"
-                format="#[payload.format default 'MT']"
+                messageType="#[vars.msgType]"
+                format="#[vars.msgFormat]"
                 standardRelease="SR2024" />
             
             <!-- ✅ Additional Business Rule Validation -->
@@ -656,7 +698,7 @@ output application/json
                 <when expression="#[payload.messageType == 'MT103']">
                     <!-- Extract amount and check limits -->
                     <set-variable variableName="amount" 
-                        value="#[payload.messageContent match /:32A:\d{6}[A-Z]{3}([\d,\.]+)/ default ['0']][0]" />
+                        value="#[(payload.messageContent match /:32A:\d{6}[A-Z]{3}([\d,\.]+)/)[0] default '0']" />
                     
                     <choice>
                         <when expression="#[vars.amount as Number > 1000000]">
@@ -751,29 +793,31 @@ output application/json
         
         <logger level="INFO" message="🔄 MT-to-MX conversion requested: #[payload.mtMessageType]" />
         
+        <!-- ✅ Save values and clear payload -->
         <set-variable variableName="originalMtContent" value="#[payload.mtContent]" />
+        <set-variable variableName="mtType" value="#[payload.mtMessageType]" />
+        <set-payload value="#[vars.mtType]" />
         
         <!-- Translate MT to MX -->
         <swift:translate-mt-to-mx config-ref="SWIFT_Config"
-            mtMessageType="#[payload.mtMessageType]" />
+            mtMessageType="#[vars.mtType]" />
         
-        <logger level="INFO" message="✅ Translated: #[payload.mtMessageType] → #[payload.mxMessageType]" />
+        <logger level="INFO" message="✅ Translated: #[payload.mtMessageType default 'MT103'] → #[payload.mxMessageType default 'pacs.008']" />
         
         <!-- ✅ DataWeave Metadata Demo: Parse MX XML and extract structured data -->
         <ee:transform>
             <ee:message>
                 <ee:set-payload><![CDATA[%dw 2.0
 output application/json
-input payload application/xml
 ---
 {
     conversionSummary: {
         sourceFormat: "MT",
         targetFormat: "MX",
-        mtMessageType: payload.mtMessageType,
-        mxMessageType: payload.mxMessageType,
-        translationSuccess: payload.success,
-        timestamp: payload.translationTimestamp
+        mtMessageType: payload.mtMessageType default "UNKNOWN",
+        mxMessageType: payload.mxMessageType default "UNKNOWN",
+        translationSuccess: payload.success default false,
+        timestamp: now() as String
     },
     
     // ✅ Demonstrate MX XML parsing (ISO 20022 structure)
@@ -829,35 +873,35 @@ input payload application/xml
     messageType: "ISO20022_pacs.008",
     parsedAt: now() as String,
     
-    // Group Header
+    // Group Header with null safety
     groupHeader: {
-        messageId: payload.Document.*GrpHdr.MsgId,
-        creationDateTime: payload.Document.*GrpHdr.CreDtTm,
-        numberOfTransactions: payload.Document.*GrpHdr.NbOfTxs as Number,
+        messageId: payload.Document.*GrpHdr.MsgId default "UNKNOWN",
+        creationDateTime: payload.Document.*GrpHdr.CreDtTm default (now() as String),
+        numberOfTransactions: (payload.Document.*GrpHdr.NbOfTxs default "0") as Number,
         settlementInformation: {
-            method: payload.Document.*GrpHdr.SttlmInf.SttlmMtd,
+            method: payload.Document.*GrpHdr.SttlmInf.SttlmMtd default "UNKNOWN",
             account: payload.Document.*GrpHdr.SttlmInf.SttlmAcct.Id.IBAN default "N/A"
         }
     },
     
-    // Credit Transfer Transaction Information (array of payments)
-    transactions: payload.Document.*CdtTrfTxInf map {
+    // Credit Transfer Transaction Information (array of payments) with null safety
+    transactions: (payload.Document.*CdtTrfTxInf default []) map {
         paymentIdentification: {
-            instructionId: $.PmtId.InstrId,
-            endToEndId: $.PmtId.EndToEndId,
-            transactionId: $.PmtId.TxId,
+            instructionId: $.PmtId.InstrId default "N/A",
+            endToEndId: $.PmtId.EndToEndId default "N/A",
+            transactionId: $.PmtId.TxId default "N/A",
             uetr: $.PmtId.UETR default null // Unique End-to-end Transaction Reference
         },
         
         settlementAmount: {
-            currency: $.IntrBkSttlmAmt.@Ccy,
-            amount: $.IntrBkSttlmAmt as Number
+            currency: $.IntrBkSttlmAmt.@Ccy default "USD",
+            amount: ($.IntrBkSttlmAmt default "0") as Number
         },
         
-        valueDate: $.IntrBkSttlmDt,
+        valueDate: $.IntrBkSttlmDt default (now() as String { format: "yyyy-MM-dd" }),
         
         debtor: {
-            name: $.Dbtr.Nm,
+            name: $.Dbtr.Nm default "UNKNOWN",
             account: $.DbtrAcct.Id.IBAN default $.DbtrAcct.Id.Othr.Id default "N/A",
             agent: {
                 bic: $.DbtrAgt.FinInstnId.BICFI default "N/A",
@@ -866,7 +910,7 @@ input payload application/xml
         },
         
         creditor: {
-            name: $.Cdtr.Nm,
+            name: $.Cdtr.Nm default "UNKNOWN",
             account: $.CdtrAcct.Id.IBAN default $.CdtrAcct.Id.Othr.Id default "N/A",
             agent: {
                 bic: $.CdtrAgt.FinInstnId.BICFI default "N/A",
@@ -881,18 +925,18 @@ input payload application/xml
         
         charges: {
             bearer: $.ChrgBr default "SHAR", // Shared charges
-            details: $.ChrgsInf map {
-                amount: $.Amt.@Ccy ++ " " ++ $.Amt,
+            details: ($.ChrgsInf default []) map {
+                amount: ($.Amt.@Ccy default "USD") ++ " " ++ ($.Amt default "0"),
                 agent: $.Agt.FinInstnId.BICFI default "N/A"
             }
         }
     },
     
-    // Metadata for tracking
+    // Metadata for tracking with null safety
     metadata: {
-        totalTransactions: sizeOf(payload.Document.*CdtTrfTxInf),
-        totalAmount: sum(payload.Document.*CdtTrfTxInf.*IntrBkSttlmAmt map $ as Number),
-        currencies: (payload.Document.*CdtTrfTxInf.*IntrBkSttlmAmt.@Ccy) distinctBy $,
+        totalTransactions: sizeOf(payload.Document.*CdtTrfTxInf default []),
+        totalAmount: sum((payload.Document.*CdtTrfTxInf.*IntrBkSttlmAmt default []) map (($ default "0") as Number)),
+        currencies: ((payload.Document.*CdtTrfTxInf.*IntrBkSttlmAmt.@Ccy default []) default ["USD"]) distinctBy $,
         processingMode: "ISO20022_NATIVE"
     }
 }]]></ee:set-payload>
@@ -933,7 +977,7 @@ output application/json
     remediation: do {
         var code = payload.rejectCode
         ---
-        if (code startsWith "K") {
+        if (code startsWith "K")
             // K-series: Message format errors
             {
                 category: "FORMAT_ERROR",
@@ -942,7 +986,7 @@ output application/json
                 alertTeam: "Development Team",
                 sla: "Fix within 2 hours"
             }
-        } else if (code startsWith "D") {
+        else if (code startsWith "D")
             // D-series: Delivery errors
             {
                 category: "DELIVERY_ERROR",
@@ -951,7 +995,7 @@ output application/json
                 alertTeam: "Operations Team",
                 sla: "Retry within 30 minutes"
             }
-        } else if (code startsWith "S") {
+        else if (code startsWith "S")
             // S-series: Security/authentication errors
             {
                 category: "SECURITY_ERROR",
@@ -960,7 +1004,7 @@ output application/json
                 alertTeam: "Security Team",
                 sla: "Investigate immediately"
             }
-        } else {
+        else
             {
                 category: "UNKNOWN_ERROR",
                 action: payload.suggestedAction,
@@ -968,7 +1012,6 @@ output application/json
                 alertTeam: "SWIFT Operations",
                 sla: "Escalate within 1 hour"
             }
-        }
     },
     
     // Provide historical context (mock data for demo)

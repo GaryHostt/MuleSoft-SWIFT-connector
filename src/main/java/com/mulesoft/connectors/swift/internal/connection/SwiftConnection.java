@@ -421,12 +421,30 @@ public class SwiftConnection {
     }
 
     private boolean isAuthenticationSuccessful(String response) {
-        return response != null && response.startsWith("AUTH_OK");
+        // Accept either "AUTH_OK" or SWIFT login response formats
+        return response != null && 
+               (response.startsWith("AUTH_OK") || 
+                response.contains("LOGIN_OK") || 
+                response.contains("LOGIN_SUCCESSFUL") ||
+                (response.contains("{4:") && !response.contains("ERROR")));
     }
 
     private String extractSessionId(String response) {
-        // Simplified extraction
-        return response.substring(response.lastIndexOf(":") + 1);
+        // Extract session ID from SWIFT message or fallback
+        if (response.contains(":20:")) {
+            // Extract from Tag 20 (Transaction Reference)
+            int start = response.indexOf(":20:") + 4;
+            int end = response.indexOf("\n", start);
+            if (end > start) {
+                return response.substring(start, end).trim();
+            }
+        }
+        // Fallback: use last part after colon
+        if (response.lastIndexOf(":") > 0) {
+            return response.substring(response.lastIndexOf(":") + 1).trim();
+        }
+        // Default: generate UUID
+        return "SESSION-" + java.util.UUID.randomUUID().toString().substring(0, 8);
     }
 
     // Getters

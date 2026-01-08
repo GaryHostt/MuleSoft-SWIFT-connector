@@ -155,6 +155,16 @@ def handle_client(conn, addr):
     
     session_id = f"SESSION-{addr[0]}-{addr[1]}"
     
+    # ✅ Send immediate login response
+    login_response = (
+        "{1:F01MOCKSVRXXXXAXXX0000000000}"
+        "{2:I001MOCKRCVRXXXXN}"
+        "{4:\n:20:LOGIN_OK\n:79:LOGIN_SUCCESSFUL\n-}"
+        "{5:{MAC:ABCD1234}{CHK:5678EFGH}}\n"
+    )
+    conn.send(login_response.encode())
+    print(f"✅ Sent login response to {addr}")
+    
     # ✅ Create session
     ACTIVE_SESSIONS[session_id] = {
         'created_at': time.time(),

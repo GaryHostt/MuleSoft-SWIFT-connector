@@ -1,0 +1,541 @@
+{
+  "info": {
+    "name": "SWIFT Connector Demo API",
+    "description": "Comprehensive Postman collection for testing the MuleSoft SWIFT Connector Demo Application. Includes payment processing, gpi tracking, validation, transformation, and observability endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8081",
+      "type": "string"
+    },
+    {
+      "key": "uetr",
+      "value": "550e8400-e29b-41d4-a716-446655440000",
+      "type": "string"
+    },
+    {
+      "key": "messageId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Core Payment Operations",
+      "item": [
+        {
+          "name": "Send Payment (MT103)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has success field\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData).to.have.property('messageId');",
+                  "});",
+                  "",
+                  "// Save messageId for subsequent requests",
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.messageId) {",
+                  "        pm.collectionVariables.set('messageId', jsonData.messageId);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"1000.00\",\n  \"currency\": \"USD\",\n  \"receiver\": \"BANKDE33XXX\",\n  \"orderingCustomer\": \"John Doe\\n123 Main Street\\nNew York, NY 10001\",\n  \"beneficiary\": \"Jane Smith\\n456 Oak Avenue\\nBerlin, Germany\",\n  \"transactionId\": \"TXN-{{$timestamp}}\",\n  \"reference\": \"INV-2024-001\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/payments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "payments"]
+            },
+            "description": "Sends an MT103 Single Customer Credit Transfer via SWIFT network. Includes sanctions screening and audit logging."
+          },
+          "response": []
+        },
+        {
+          "name": "Track Payment (gpi)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has tracking data\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('uetr');",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/payments/{{uetr}}/track",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "payments", "{{uetr}}", "track"]
+            },
+            "description": "Track a SWIFT gpi payment using its UETR (Unique End-to-End Transaction Reference)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Validation & Compliance",
+      "item": [
+        {
+          "name": "Validate Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messageType\": \"MT103\",\n  \"format\": \"MT\",\n  \"messageContent\": \":20:REF123456\\n:32A:240108USD1000,00\\n:50K:JOHN DOE\\n123 MAIN ST\\n:59:JANE SMITH\\n456 OAK AVE\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/validate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "validate"]
+            },
+            "description": "Validate SWIFT message against SR2024 standards. Returns categorized errors (SYNTAX_ERROR vs BUSINESS_RULE_VIOLATION)."
+          },
+          "response": []
+        },
+        {
+          "name": "Pre-Flight Validation (No Send)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messageType\": \"MT103\",\n  \"format\": \"MT\",\n  \"messageContent\": \":20:REF123456\\n:23B:CRED\\n:32A:240108USD5000000,00\\n:50K:HIGH VALUE CUSTOMER\\n:59:RECIPIENT BANK\\n:70:URGENT PAYMENT\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/validate-only",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "validate-only"]
+            },
+            "description": "Pre-flight validation for high-value payments. Checks schema, business rules, and amount limits WITHOUT sending to SWIFT."
+          },
+          "response": []
+        },
+        {
+          "name": "Sanctions Screening",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"TXN-{{$timestamp}}\",\n  \"orderingCustomer\": \"John Doe\",\n  \"beneficiary\": \"Jane Smith\",\n  \"amount\": 1000.00,\n  \"currency\": \"USD\",\n  \"beneficiaryCountry\": \"DE\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/screen",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "screen"]
+            },
+            "description": "Screen transaction against sanctions lists (OFAC, EU, UN). Demonstrates BUSINESS_RULE_VIOLATION error handling."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Message Transformation",
+      "item": [
+        {
+          "name": "Translate MT to MX (ISO 20022)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messageType\": \"MT103\",\n  \"mtContent\": \":20:REF123456789\\n:23B:CRED\\n:32A:240108USD1000,00\\n:50K:/1234567890\\nJOHN DOE\\n123 MAIN STREET\\nNEW YORK NY 10001\\n:59:/DE89370400440532013000\\nJANE SMITH\\nBERLIN GERMANY\\n:70:INVOICE PAYMENT INV-2024-001\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/translate/mt-to-mx",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "translate", "mt-to-mx"]
+            },
+            "description": "Convert legacy MT103 message to modern ISO 20022 MX format (pacs.008). Critical for SWIFT's MT-to-MX migration."
+          },
+          "response": []
+        },
+        {
+          "name": "Transform MT-to-MX (Advanced)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mtMessageType\": \"MT103\",\n  \"mtContent\": \":20:REF123456789\\n:23B:CRED\\n:32A:240108USD1000,00\\n:50K:JOHN DOE\\n:59:JANE SMITH\\n:70:PAYMENT FOR SERVICES\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/transform/mt-to-mx",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "transform", "mt-to-mx"]
+            },
+            "description": "Advanced MT-to-MX conversion with DataWeave metadata extraction. Returns structured MX XML with parsed payment details."
+          },
+          "response": []
+        },
+        {
+          "name": "Parse MX to JSON",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/xml"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08\">\n  <FIToFICstmrCdtTrf>\n    <GrpHdr>\n      <MsgId>MSG123456</MsgId>\n      <CreDtTm>2024-01-08T10:30:00</CreDtTm>\n      <NbOfTxs>1</NbOfTxs>\n    </GrpHdr>\n    <CdtTrfTxInf>\n      <PmtId>\n        <InstrId>INSTR123</InstrId>\n        <EndToEndId>E2E123</EndToEndId>\n      </PmtId>\n      <IntrBkSttlmAmt Ccy=\"USD\">1000.00</IntrBkSttlmAmt>\n      <Dbtr>\n        <Nm>John Doe</Nm>\n      </Dbtr>\n      <Cdtr>\n        <Nm>Jane Smith</Nm>\n      </Cdtr>\n    </CdtTrfTxInf>\n  </FIToFICstmrCdtTrf>\n</Document>"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/parse/mx-to-json",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "parse", "mx-to-json"]
+            },
+            "description": "Parse ISO 20022 pacs.008 XML into structured JSON. Useful for modern REST APIs that consume SWIFT data."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Error Handling & Troubleshooting",
+      "item": [
+        {
+          "name": "Parse NACK Code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rejectCode\": \"K90\",\n  \"messageId\": \"MSG-{{$timestamp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/nack/parse",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "nack", "parse"]
+            },
+            "description": "Parse SWIFT NACK rejection codes and map to actionable remediation steps. Includes severity, team assignment, and SLA."
+          },
+          "response": []
+        },
+        {
+          "name": "Parse NACK - Format Error (K-series)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rejectCode\": \"K23\",\n  \"messageId\": \"MSG-FORMAT-ERROR\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/nack/parse",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "nack", "parse"]
+            },
+            "description": "K-series errors indicate message format issues (non-retryable)."
+          },
+          "response": []
+        },
+        {
+          "name": "Parse NACK - Delivery Error (D-series)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rejectCode\": \"D01\",\n  \"messageId\": \"MSG-DELIVERY-ERROR\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/nack/parse",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "nack", "parse"]
+            },
+            "description": "D-series errors indicate delivery/routing issues (retryable)."
+          },
+          "response": []
+        },
+        {
+          "name": "Parse Multi-Block SWIFT Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{1:F01BANKUS33AXXX0000000000}{2:I103BANKDE33XXXXN}{3:{121:550e8400-e29b-41d4-a716-446655440000}}{4:\n:20:REF123456789\n:23B:CRED\n:32A:240108USD1000,00\n:50K:/1234567890\nJOHN DOE\n123 MAIN STREET\n:59:/DE89370400440532013000\nJANE SMITH\nBERLIN GERMANY\n:70:INVOICE PAYMENT\n-}{5:{MAC:ABCDEF1234567890}{CHK:9876543210ABCDEF}}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/parse/multi-block",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "parse", "multi-block"]
+            },
+            "description": "Extract and parse all 5 SWIFT FIN blocks: Basic Header, Application Header, User Header (UETR), Text, and Trailer (MAC/CHK)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Reference Data",
+      "item": [
+        {
+          "name": "Lookup BIC Code",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/bic/BANKDE33XXX",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bic", "BANKDE33XXX"]
+            },
+            "description": "Lookup BIC (Bank Identifier Code) details from SWIFT directory. Returns institution name, country, and active status."
+          },
+          "response": []
+        },
+        {
+          "name": "Check Holiday Calendar (TARGET2)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/holidays/2024-12-25/TARGET2",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "holidays", "2024-12-25", "TARGET2"]
+            },
+            "description": "Check if a date is a holiday on TARGET2 (EU), US_FED, or UK_BOE calendars. Used for value date validation."
+          },
+          "response": []
+        },
+        {
+          "name": "Check Holiday Calendar (US Federal)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/holidays/2024-07-04/US_FED",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "holidays", "2024-07-04", "US_FED"]
+            },
+            "description": "Check US Federal Reserve holidays."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Observability & Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"System is UP\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql('UP');",
+                  "});",
+                  "",
+                  "pm.test(\"SWIFT connection active\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.swift.connected).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            },
+            "description": "Health check endpoint. Returns SWIFT session status, sequence numbers, and connection state."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/metrics",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "metrics"]
+            },
+            "description": "Get SWIFT connector metrics: messages sent/received, success rate, average latency, and failure count."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Advanced Scenarios",
+      "item": [
+        {
+          "name": "High-Value Payment (Triggers Validation)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"1500000.00\",\n  \"currency\": \"USD\",\n  \"receiver\": \"BANKDE33XXX\",\n  \"orderingCustomer\": \"ACME Corporation\",\n  \"beneficiary\": \"Global Supplier Ltd\",\n  \"transactionId\": \"HIGH-VALUE-{{$timestamp}}\",\n  \"reference\": \"CONTRACT-2024-MEGA\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/payments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "payments"]
+            },
+            "description": "Send a high-value payment (>$1M) that triggers additional approval workflows."
+          },
+          "response": []
+        },
+        {
+          "name": "Invalid MT103 (SYNTAX_ERROR)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messageType\": \"MT103\",\n  \"format\": \"MT\",\n  \"messageContent\": \":20:REF123\\n:32A:INVALID_DATE_FORMAT\\n:50K:SENDER\\n:59:RECEIVER\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/validate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "validate"]
+            },
+            "description": "Test SYNTAX_ERROR handling with malformed date in field :32A (should be YYMMDD)."
+          },
+          "response": []
+        },
+        {
+          "name": "Holiday Value Date (BUSINESS_RULE_VIOLATION)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messageType\": \"MT103\",\n  \"format\": \"MT\",\n  \"messageContent\": \":20:REF123456\\n:32A:241225USD1000,00\\n:50K:SENDER\\n:59:RECEIVER\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/validate-only",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "validate-only"]
+            },
+            "description": "Test BUSINESS_RULE_VIOLATION with value date on Christmas (2024-12-25)."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
+
