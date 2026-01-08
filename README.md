@@ -587,22 +587,5 @@ mvn install:install-file \
 This connector requires a MuleSoft Enterprise License.  
 Evaluation licenses are available for testing purposes.
 
-## Roadmap
-
-### Upcoming Features
-- [ ] SWIFT API Market Infrastructure support
-- [ ] Enhanced ISO 20022 migration toolkit
-- [ ] Real-time fraud detection hooks
-- [ ] Advanced reconciliation operations
-- [ ] SWIFT for Corporates integration
-
-## Contributing
-
-Please contact MuleSoft Professional Services for custom development.
-
----
-
-**Built with ❤️ by MuleSoft Financial Services Team**
-
 *Designed for Mule 4.10+ | Java 17 | Enterprise-Grade Financial Integration*
 
