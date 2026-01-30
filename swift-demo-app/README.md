@@ -78,7 +78,7 @@ This demo showcases the specific operations of the custom SWIFT connector:
 ---
 
 ## Prerequisites
-- Mule Runtime 4.10+
+- Mule Runtime 4.9+
 - Java 17
 - SWIFT Connector 1.0.0 installed
 - Maven 3.8+
@@ -438,5 +438,5 @@ Enterprise License Required
 ---
 
 **Built with MuleSoft SWIFT Connector v1.0.0**  
-*Mule 4.10+ | Java 17 | Mule SDK 1.10.0*
+*Mule 4.9+ | Java 17 | Mule SDK 1.10.0*
 
