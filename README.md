@@ -1,5 +1,7 @@
 # MuleSoft SWIFT Connector
 
+![SWIFT Connector](images.png)
+
 Enterprise-grade SWIFT connector for MuleSoft Anypoint Platform, supporting legacy MT standards, modern ISO 20022 (MX), SWIFT gpi, and complete financial compliance features.
 
 ## ⚠️ **2026 STRATEGIC NOTE: MT-to-MX Transition**
