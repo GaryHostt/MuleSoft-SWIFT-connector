@@ -829,5 +829,5 @@ mvn install:install-file \
 This connector requires a MuleSoft Enterprise License.  
 Evaluation licenses are available for testing purposes.
 
-*Designed for Mule 4.10+ | Java 17 | Enterprise-Grade Financial Integration*
+*Designed for Mule 4.9+ | Java 17 | Enterprise-Grade Financial Integration*
 
